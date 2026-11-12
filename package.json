@@ -1,0 +1,12 @@
+﻿{
+  "name": "home-inventory",
+  "version": "1.0.0",
+  "private": true,
+  "description": "瀹跺涵鐗╄祫娓呯偣琛細璁板綍瀹堕噷鐨勭墿璧勩€佹暟閲忓拰瀛樻斁浣嶇疆锛屾墜鏈哄彲闅忔椂淇敼",
+  "main": "server.js",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "test": "node test/parse.test.js && node test/smoke.js"
+  }
+}

@@ -1,0 +1,29 @@
+[Unit]
+Description=Home Inventory (家庭物资清点表)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__
+# 数据目录默认是 __DIR__/data；想放到别处（如挂载的硬盘）就改 INVENTORY_DATA
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=INVENTORY_DATA=__DIR__/data
+# 首次启动时的初始密码（之后在网页「设置」里改，这里的值就不再生效）
+Environment=INVENTORY_PASSWORD=home1234
+ExecStart=__NODE__ --no-warnings server.js
+Restart=always
+RestartSec=3
+# 开发板内存有限，限制一下 V8 堆，避免异常时吃光内存（512MB 板子建议 128~160）
+Environment=NODE_OPTIONS=--max-old-space-size=160
+# 安全加固（仅允许写数据目录）
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__DIR__/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

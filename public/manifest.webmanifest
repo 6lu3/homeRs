@@ -1,0 +1,9 @@
+{
+  "name": "家庭物资清点表",
+  "short_name": "家庭物资",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f6f6",
+  "theme_color": "#2b7a78",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

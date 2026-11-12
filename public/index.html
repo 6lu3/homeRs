@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2b7a78">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>家庭物资清点表</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- 登录 -->
+<section id="login" class="screen hidden">
+  <form id="login-form" class="login-card">
+    <div class="logo">🏠</div>
+    <h1>家庭物资清点表</h1>
+    <p class="muted">请输入家庭密码</p>
+    <input type="password" id="login-pw" placeholder="密码" autocomplete="current-password" required>
+    <button type="submit" class="btn primary block">进入</button>
+    <p id="login-err" class="err"></p>
+  </form>
+</section>
+
+<!-- 主界面 -->
+<section id="app" class="screen hidden">
+  <header class="topbar">
+    <div class="search-wrap">
+      <input type="search" id="q" placeholder="搜索物品、备注、位置…" autocomplete="off">
+      <button type="button" id="q-clear" class="icon-btn" title="清除">✕</button>
+    </div>
+    <button type="button" id="filter-btn" class="icon-btn" title="筛选">⚙</button>
+  </header>
+
+  <form id="quick-form" class="quick">
+    <input id="quick-text" placeholder="✨ 说一句话录入：买了两盒酸奶放冷藏" autocomplete="off" enterkeyhint="send" maxlength="200">
+    <button type="submit" class="btn small primary">录入</button>
+  </form>
+  <p id="quick-hint" class="muted quick-hint">手机上点键盘的 🎤 直接说；支持"把X放到Y""买了X放Y""X用完了""X还剩N个""保质期到12月1日"等说法。</p>
+
+  <div id="filters" class="filters hidden">
+    <label>位置
+      <select id="f-location"><option value="">全部位置</option></select>
+    </label>
+    <label>分类
+      <select id="f-category"><option value="">全部分类</option></select>
+    </label>
+    <label>到期
+      <select id="f-expiring">
+        <option value="">不限</option>
+        <option value="0">已过期</option>
+        <option value="7">7 天内到期</option>
+        <option value="30">30 天内到期</option>
+        <option value="90">90 天内到期</option>
+      </select>
+    </label>
+    <button type="button" id="f-reset" class="btn small">重置</button>
+  </div>
+
+  <div id="stats" class="stats"></div>
+
+  <main id="list" class="list"></main>
+  <div id="empty" class="empty hidden">没有物品，点右下角「＋」添加</div>
+
+  <button type="button" id="add-btn" class="fab" title="添加物品">＋</button>
+
+  <nav class="tabbar">
+    <button type="button" class="tab" data-view="home">🏠 首页</button>
+    <button type="button" class="tab active" data-view="items">📦 物品</button>
+    <button type="button" class="tab" data-view="shopping">🛒 清单<span id="shop-badge" class="badge hidden"></span></button>
+    <button type="button" class="tab" data-view="plans">🗺 图纸</button>
+    <button type="button" class="tab" data-view="locations">🗄 位置</button>
+    <button type="button" class="tab" data-view="settings">⚙ 设置</button>
+  </nav>
+</section>
+
+<!-- 首页仪表盘 -->
+<section id="view-home" class="screen subview hidden">
+  <header class="topbar"><h2>🏠 家庭物资</h2><span id="home-date" class="muted"></span></header>
+  <div id="home-body" class="pad home"></div>
+</section>
+
+<!-- 购物清单 -->
+<section id="view-shopping" class="screen subview hidden">
+  <header class="topbar"><h2>🛒 购物清单</h2><button type="button" id="shop-clear" class="btn small">清除已买</button></header>
+  <form id="shop-form" class="quick">
+    <input id="shop-text" placeholder="手动添加要买的东西" autocomplete="off" enterkeyhint="done" maxlength="60">
+    <button type="submit" class="btn small primary">添加</button>
+  </form>
+  <div id="shop-body" class="pad"></div>
+  <p class="muted pad">给物品设置「最低库存」后，数量低于它就会自动出现在这里；点「已买」会把数量补到最低库存。</p>
+</section>
+
+<!-- 图纸（户型图） -->
+<section id="view-plans" class="screen subview hidden">
+  <header class="topbar">
+    <select id="plan-select" class="topbar-select"></select>
+    <button type="button" id="plan-upload" class="btn small">＋ 图纸</button>
+    <button type="button" id="plan-more" class="btn small">⋯</button>
+    <input type="file" id="plan-file" accept="image/*" hidden>
+  </header>
+  <div id="plan-toolbar" class="plan-toolbar hidden">
+    <button type="button" id="plan-mark" class="btn small primary">📍 标记位置</button>
+    <span id="plan-hint" class="muted"></span>
+    <span class="spacer"></span>
+    <button type="button" id="plan-zoom-out" class="btn small" title="缩小">－</button>
+    <button type="button" id="plan-zoom-in" class="btn small" title="放大">＋</button>
+  </div>
+  <div id="plan-stage" class="plan-stage hidden">
+    <div id="plan-wrap" class="plan-wrap">
+      <img id="plan-img" alt="户型图" draggable="false">
+      <div id="plan-pins"></div>
+    </div>
+  </div>
+  <div id="plan-empty" class="empty hidden">
+    <p>还没有图纸。</p>
+    <p class="muted">点右上角「＋ 图纸」上传户型图（拍照、截图或图片文件都可以），然后用「标记位置」把柜子、抽屉等存放位置点在图上，以后点图上的标记就能看到那里放了什么。</p>
+  </div>
+  <div id="pin-pop" class="pin-pop hidden">
+    <div><strong id="pp-name"></strong> <span id="pp-count" class="muted"></span></div>
+    <div id="pp-path" class="muted"></div>
+    <div class="actions">
+      <button type="button" class="btn small primary" data-act="view">查看物品</button>
+      <button type="button" class="btn small" data-act="add">添加物品到这里</button>
+      <button type="button" class="btn small" data-act="unpin">移除标记</button>
+      <button type="button" class="btn small" data-act="close">关闭</button>
+    </div>
+  </div>
+</section>
+
+<!-- 选择要标记的位置 -->
+<div id="pick-loc" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <div class="sheet-body">
+    <div class="sheet-head"><button type="button" class="btn small" id="pick-cancel">取消</button><strong>标记位置</strong><button type="button" class="btn small primary" id="pick-ok">下一步</button></div>
+    <div class="sheet-scroll">
+      <label>选择要标在图纸上的位置<select id="pick-select"></select></label>
+      <p class="muted">下一步后，在图纸上点一下对应的地方即可。已标记的位置可以直接在图上拖动调整。</p>
+    </div>
+  </div>
+</div>
+
+<!-- 图纸操作菜单 -->
+<div id="plan-actions" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <div class="sheet-body">
+    <div class="sheet-head"><button type="button" class="btn small" data-act="close">关闭</button><strong>图纸操作</strong><span></span></div>
+    <div class="sheet-scroll">
+      <button type="button" class="btn block" data-act="rename">重命名</button>
+      <button type="button" class="btn block" data-act="replace">更换图片（保留标记）</button>
+      <button type="button" class="btn block danger" data-act="delete">删除此图纸</button>
+    </div>
+  </div>
+</div>
+
+<!-- 位置管理 -->
+<section id="view-locations" class="screen subview hidden">
+  <header class="topbar"><h2>存放位置</h2><button type="button" id="loc-add-root" class="btn small">＋ 房间</button></header>
+  <div id="loc-tree" class="loc-tree"></div>
+  <p class="muted pad">提示：点击位置名可改名或删除，「＋」可添加下级（如柜子、抽屉、层）。</p>
+</section>
+
+<!-- 设置 -->
+<section id="view-settings" class="screen subview hidden">
+  <header class="topbar"><h2>设置</h2></header>
+  <div class="pad">
+    <h3>数据备份</h3>
+    <a class="btn block" href="/api/export.csv" download>导出 CSV（可用 Excel 打开）</a>
+    <label class="btn block">导入 CSV<input type="file" id="import-file" accept=".csv,text/csv" hidden></label>
+    <p class="muted">导入列：名称、分类、数量、单位、位置（如「厨房 / 吊柜」，不存在会自动创建）、到期日、备注。只需「名称」必填。</p>
+    <p id="import-result" class="muted"></p>
+
+    <h3>回收站 <span id="trash-count" class="muted"></span></h3>
+    <div id="trash-list"></div>
+    <div class="row">
+      <button type="button" id="trash-refresh" class="btn block">查看回收站</button>
+      <button type="button" id="trash-empty" class="btn block danger">清空回收站</button>
+    </div>
+    <p class="muted">删除的物品会在这里保留 30 天，之后自动彻底删除。</p>
+
+    <h3>变动记录</h3>
+    <div id="log-list"></div>
+    <button type="button" id="log-more" class="btn block">查看最近 100 条</button>
+
+    <h3>修改密码</h3>
+    <form id="pw-form">
+      <input type="password" id="pw-old" placeholder="原密码" autocomplete="current-password" required>
+      <input type="password" id="pw-new" placeholder="新密码（至少 4 位）" autocomplete="new-password" required minlength="4">
+      <button type="submit" class="btn primary block">保存新密码</button>
+      <p id="pw-msg" class="muted"></p>
+    </form>
+
+    <h3>其他</h3>
+    <button type="button" id="logout" class="btn block">退出登录</button>
+    <p class="muted">把本页「添加到主屏幕」后可像 App 一样使用。</p>
+  </div>
+</section>
+
+<!-- 物品编辑弹层 -->
+<div id="editor" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <form id="item-form" class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="ed-cancel">取消</button>
+      <strong id="ed-title">添加物品</strong>
+      <button type="submit" class="btn small primary">保存</button>
+    </div>
+    <div class="sheet-scroll">
+      <div class="img-area" id="ed-img-area">
+        <img id="ed-img" alt="" class="hidden">
+        <div id="ed-img-placeholder" class="img-placeholder">📷 拍照 / 选择图片</div>
+        <input type="file" id="ed-img-file" accept="image/*" capture="environment" hidden>
+      </div>
+      <button type="button" id="ed-img-remove" class="btn small hidden">移除图片</button>
+
+      <label>名称 *<input id="ed-name" required placeholder="例如：创可贴" autocomplete="off"></label>
+      <div class="row">
+        <label>数量<input id="ed-qty" type="number" step="any" min="0" value="1" inputmode="decimal"></label>
+        <label>单位<input id="ed-unit" placeholder="个 / 盒 / 瓶" list="unit-list" autocomplete="off"></label>
+      </div>
+      <datalist id="unit-list"><option>个</option><option>盒</option><option>瓶</option><option>包</option><option>袋</option><option>罐</option><option>卷</option><option>件</option><option>双</option><option>套</option></datalist>
+      <label>分类<input id="ed-category" placeholder="药品 / 食品 / 工具…" list="cat-list" autocomplete="off"></label>
+      <datalist id="cat-list"></datalist>
+      <label>存放位置<select id="ed-location"><option value="">（未设置）</option></select></label>
+      <div class="row">
+        <label>到期日<input id="ed-expires" type="date"></label>
+        <label>最低库存<input id="ed-min" type="number" step="any" min="0" placeholder="低于则提醒购买" inputmode="decimal"></label>
+      </div>
+      <label>备注<textarea id="ed-note" rows="3" placeholder="规格、购买时间、谁在用…"></textarea></label>
+      <button type="button" id="ed-delete" class="btn danger block hidden">删除此物品</button>
+      <div id="ed-log" class="ed-log hidden"></div>
+    </div>
+  </form>
+</div>
+
+<!-- 快速录入确认 -->
+<div id="confirm" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="cf-cancel">取消</button>
+      <strong>确认录入</strong>
+      <button type="button" class="btn small primary" id="cf-ok">确认</button>
+    </div>
+    <div class="sheet-scroll">
+      <p id="cf-text" class="muted"></p>
+      <div id="cf-list"></div>
+      <p id="cf-note" class="muted"></p>
+    </div>
+  </div>
+</div>
+
+<!-- 通用对话框（代替浏览器 prompt / confirm，部分内嵌浏览器不支持原生弹窗） -->
+<div id="dialog" class="dialog hidden" role="dialog" aria-modal="true">
+  <div class="dialog-backdrop"></div>
+  <form id="dialog-form" class="dialog-box">
+    <h3 id="dlg-title"></h3>
+    <p id="dlg-msg" class="muted"></p>
+    <input id="dlg-input" autocomplete="off">
+    <div id="dlg-buttons" class="dialog-buttons"></div>
+  </form>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -2,6 +2,7 @@
 (() => {
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+  const ICO = (name, cls = 'ico') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${name}"></use></svg>`;
   const state = { items: [], locations: [], categories: [], editing: null, pendingImage: null, view: 'items' };
 
   // ---------- 工具 ----------
@@ -166,13 +167,13 @@
     $('#empty').classList.toggle('hidden', state.items.length > 0);
     list.innerHTML = state.items.map(i => `
       <article class="card" data-id="${i.id}">
-        ${i.image ? `<img class="thumb" src="/uploads/${esc(i.image)}" alt="" loading="lazy">` : `<div class="thumb">📦</div>`}
+        ${i.image ? `<img class="thumb" src="/uploads/${esc(i.image)}" alt="" loading="lazy">` : `<div class="thumb">${ICO('box', 'thumb-ico')}</div>`}
         <div class="body">
           <div class="name"><span>${esc(i.name)}</span><span class="qty">× ${fmtQty(i.quantity)}${esc(i.unit)}</span>${expiryBadge(i.expires_at)}${lowBadge(i)}</div>
-          <div class="meta">📍 ${i.location_path ? esc(i.location_path) : '<i>未设置位置</i>'}${i.category ? ` · ${esc(i.category)}` : ''}</div>
+          <div class="meta">${ICO('map-pin')} ${i.location_path ? esc(i.location_path) : '<i>未设置位置</i>'}${i.category ? ` · ${esc(i.category)}` : ''}</div>
           ${i.note ? `<div class="note">${esc(i.note)}</div>` : ''}
         </div>
-        <div class="qty-ctl"><button type="button" data-d="1">＋</button><button type="button" data-d="-1">－</button></div>
+        <div class="qty-ctl"><button type="button" data-d="1" aria-label="增加数量">${ICO('plus')}</button><button type="button" data-d="-1" aria-label="减少数量">${ICO('minus')}</button></div>
       </article>`).join('');
   }
   $('#list').addEventListener('click', async e => {
@@ -285,14 +286,14 @@
     const btn = e.submitter || $('#quick-form button[type=submit]'); btn.disabled = true;
     try {
       const r = await postJson('/api/parse', { text });
-      if (!r.intents.length) { toast('没听懂，换个说法试试，或直接点「＋」手动添加'); return; }
+      if (!r.intents.length) { toast('没听懂，换个说法试试，或直接点右下角添加按钮'); return; }
       showConfirm(r);
     } catch (err) { toast(err.message, 3000); }
     finally { btn.disabled = false; }
   });
   function locationOptions(sel, create) {
     let html = '<option value="">（不设置位置）</option>';
-    if (create) html += `<option value="new:${esc(create.path)}" ${sel === 'new' ? 'selected' : ''}>＋ 新建：${esc(create.path)}</option>`;
+    if (create) html += `<option value="new:${esc(create.path)}" ${sel === 'new' ? 'selected' : ''}>新建：${esc(create.path)}</option>`;
     html += state.locations.map(l => `<option value="${l.id}" ${String(sel) === String(l.id) ? 'selected' : ''}>${'　'.repeat(l.depth)}${esc(l.name)}</option>`).join('');
     return html;
   }
@@ -309,7 +310,7 @@
       return `<div class="cf-item" data-i="${i}">
         <div class="cf-head"><span class="cf-act ${cls}">${label}${['restock', 'consume'].includes(it.action) ? '' : ''}</span>
           ${it.existing ? `<span class="cf-exist">已有：${esc(it.existing.name)} ×${it.existing.quantity}${esc(it.existing.unit)}${it.existing.location_path ? ' @ ' + esc(it.existing.location_path) : ''}</span>` : '<span class="cf-exist">新物品</span>'}</div>
-        ${it.warning ? `<p class="warn">⚠ ${esc(it.warning)}</p>` : ''}
+        ${it.warning ? `<p class="warn">${ICO('alert')} ${esc(it.warning)}</p>` : ''}
         <div class="row3">
           <label>名称<input data-k="name" value="${esc(it.action === 'add' ? it.name : (it.existing?.name || it.name))}" ${it.action === 'add' ? '' : 'readonly'}></label>
           <label class="${showQty ? '' : 'hidden'}">${qtyLabel}<input data-k="quantity" type="number" step="any" min="0" inputmode="decimal" value="${it.quantity ?? 1}"></label>
@@ -322,7 +323,7 @@
         </div>
       </div>`;
     }).join('');
-    $('#cf-note').textContent = r.confidence === 'low' ? '⚠ 这句话我不太确定，请核对后再确认。' : '核对无误后点「确认」，可直接修改任何一项。';
+    $('#cf-note').innerHTML = r.confidence === 'low' ? `${ICO('alert')} 这句话我不太确定，请核对后再确认。` : '核对无误后点「确认」，可直接修改任何一项。';
     $('#confirm').classList.remove('hidden');
   }
   function hideConfirm() { $('#confirm').classList.add('hidden'); }
@@ -413,11 +414,11 @@
         ${tile(c.expiringSoon, '30 天内到期', 'warn', 'items', 'data-exp="30"')}
         ${tile(c.low + c.shoppingExtra, '待购买', 'low', 'shopping')}
       </div>
-      ${d.expiring.length ? `<h3>⏰ 快到期 / 已过期</h3><div class="home-list">${expiring}</div>` : ''}
-      ${d.low.length ? `<h3>🛒 库存不足</h3><div class="home-list">${low}</div>` : ''}
-      <h3>🆕 最近添加</h3><div class="home-list">${recent || '<p class="muted">还没有物品</p>'}</div>
-      <h3>📝 最近变动</h3><div class="home-list log">${log || '<p class="muted">暂无记录</p>'}</div>
-      ${!d.expiring.length && !d.low.length ? '<p class="muted center">👍 没有到期或缺货的物品</p>' : ''}`;
+      ${d.expiring.length ? `<section class="home-block home-expiring"><h3>${ICO('clock')}快到期 / 已过期</h3><div class="home-list">${expiring}</div></section>` : ''}
+      ${d.low.length ? `<section class="home-block home-low"><h3>${ICO('cart')}库存不足</h3><div class="home-list">${low}</div></section>` : ''}
+      <section class="home-block home-recent"><h3>${ICO('plus-circle')}最近添加</h3><div class="home-list">${recent || '<p class="muted">还没有物品</p>'}</div></section>
+      <section class="home-block home-log"><h3>${ICO('file-text')}最近变动</h3><div class="home-list log">${log || '<p class="muted">暂无记录</p>'}</div></section>
+      ${!d.expiring.length && !d.low.length ? `<p class="muted center home-status">${ICO('check-circle')}没有到期或缺货的物品</p>` : ''}`;
   }
   $('#home-body').addEventListener('click', e => {
     const t = e.target.closest('[data-go]');
@@ -441,12 +442,12 @@
     const extraHtml = s.extra.map(x => `
       <div class="shop-row ${x.done ? 'done' : ''}" data-extra="${x.id}">
         <label class="chk"><input type="checkbox" data-done="${x.id}" ${x.done ? 'checked' : ''}><span class="nm">${esc(x.name)}</span>${x.note ? `<span class="meta">${esc(x.note)}</span>` : ''}</label>
-        <button type="button" class="icon-btn" data-remove="${x.id}" title="删除">✕</button>
+        <button type="button" class="icon-btn" data-remove="${x.id}" title="删除">${ICO('x')}</button>
       </div>`).join('');
     $('#shop-body').innerHTML =
       (s.low.length ? `<h3>库存不足（${s.low.length}）</h3>${lowHtml}` : '') +
       (s.extra.length ? `<h3>手动添加（${s.extra.filter(x => !x.done).length}）</h3>${extraHtml}` : '') +
-      (!s.low.length && !s.extra.length ? '<p class="muted center">清单是空的 🎉</p>' : '');
+      (!s.low.length && !s.extra.length ? `<p class="muted center empty-state">${ICO('check-circle')}清单是空的</p>` : '');
     const b = $('#shop-badge'); const n = s.low.length + s.extra.filter(x => !x.done).length; b.textContent = n || ''; b.classList.toggle('hidden', !n);
   }
   $('#shop-form').addEventListener('submit', async e => {
@@ -506,7 +507,7 @@
     $('#plan-wrap').classList.toggle('marking', plan.marking != null);
     const m = plan.marking != null && state.locations.find(l => l.id === plan.marking);
     $('#plan-hint').textContent = m ? `请点击图纸上「${m.name}」所在的位置` : '';
-    $('#plan-mark').textContent = plan.marking != null ? '取消标记' : '📍 标记位置';
+    $('#plan-mark').innerHTML = plan.marking != null ? `${ICO('x')}取消标记` : `${ICO('map-pin')}标记位置`;
   }
   $('#plan-select').addEventListener('change', e => { plan.current = Number(e.target.value); plan.activePin = null; hidePinPop(); renderPlan(); });
   $('#plan-zoom-in').addEventListener('click', () => { plan.zoom = Math.min(4, plan.zoom * 1.4); renderPlan(); });
@@ -629,11 +630,11 @@
     await loadLocations();
     $('#loc-tree').innerHTML = state.locations.map(l => `
       <div class="loc-row" data-id="${l.id}" style="margin-left:${l.depth * 20}px">
-        <span class="nm">${l.depth ? '└ ' : '🏠 '}${esc(l.name)}${l.plan_id != null ? ' <span title="已标在图纸上">📍</span>' : ''}</span>
+        <span class="nm">${l.depth ? '<span class="tree-branch">└</span>' : ICO('home')}${esc(l.name)}${l.plan_id != null ? ` <span class="loc-pin" title="已标在图纸上">${ICO('map-pin')}</span>` : ''}</span>
         <span class="cnt">${l.item_count_total ? l.item_count_total + ' 件' : ''}</span>
         <button type="button" class="btn small" data-act="view">查看</button>
-        <button type="button" class="btn small" data-act="child">＋</button>
-      </div>`).join('') || '<p class="muted pad">还没有位置，点右上角「＋ 房间」添加。</p>';
+        <button type="button" class="btn small" data-act="child" aria-label="添加下级位置">${ICO('plus')}</button>
+      </div>`).join('') || '<p class="muted pad">还没有位置，点右上角「房间」添加。</p>';
   }
   $('#loc-add-root').addEventListener('click', async () => {
     const name = await askText('添加房间', { placeholder: '例如：厨房、书房、车库' }); if (!name) return;
@@ -696,7 +697,7 @@
       <div class="shop-row" data-id="${i.id}">
         <div class="body"><span class="nm">${esc(i.name)}</span><span class="meta">× ${fmtQty(i.quantity)}${esc(i.unit)}${i.location_path ? ' · ' + esc(i.location_path) : ''} · 删于 ${fmtTime(i.deleted_at)}</span></div>
         <button type="button" class="btn small" data-restore="${i.id}">恢复</button>
-        <button type="button" class="icon-btn" data-purge="${i.id}" title="彻底删除">✕</button>
+        <button type="button" class="icon-btn" data-purge="${i.id}" title="彻底删除">${ICO('x')}</button>
       </div>`).join('');
   }
   $('#trash-refresh').addEventListener('click', () => renderTrash().catch(err => toast(err.message)));

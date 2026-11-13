@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" style="background:#f8f6f3">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#2b7a78">
+<meta name="theme-color" content="#a0715a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>家庭物资清点表</title>
@@ -14,10 +14,30 @@
 </head>
 <body>
 
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.2 10.6 12 3.4l8.8 7.2"/><path d="M5.6 9.6V20.2h12.8V9.6"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="M12 3.2 20.4 7.4v9.2L12 20.8 3.6 16.6V7.4z"/><path d="M3.6 7.4 12 11.6l8.4-4.2"/><path d="M12 11.6v9.2"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 24 24"><path d="M3 4h2.2l2.3 10.3h10.4L20.4 7H6.1"/><circle cx="9.2" cy="19.2" r="1.3"/><circle cx="17" cy="19.2" r="1.3"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 3.6 3.6 6v14.4L9 18l6 2.4 5.4-2.4V3.6L15 6z"/><path d="M9 3.6V18M15 6v14.4"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3.2 3.6 7.4 12 11.6l8.4-4.2z"/><path d="M3.6 12.4 12 16.6l8.4-4.2M3.6 17.2 12 21.4l8.4-4.2"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v2.6M12 18.8v2.6M2.6 12h2.6M18.8 12h2.6M5.3 5.3l1.9 1.9M16.8 16.8l1.9 1.9M18.7 5.3l-1.9 1.9M7.2 16.8l-1.9 1.9"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="5.6"/><path d="m15.2 15.2 4.4 4.4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4"/><path d="M12 7.2V12l3.4 2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.4 2.8 20h18.4z"/><path d="M12 9.4v4.6M12 17.2v.1"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5.5 12h13"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m5.5 17 4.2-4.2 2.8 2.8 2.2-2.2 3.8 3.6"/></symbol>
+  <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+  <symbol id="i-plus-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6zM14 3.5v4h4M9 12h6M9 16h6"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
+</svg>
+
 <!-- 登录 -->
 <section id="login" class="screen hidden">
   <form id="login-form" class="login-card">
-    <div class="logo">🏠</div>
+    <div class="logo" aria-hidden="true"><svg><use href="#i-home"></use></svg></div>
     <h1>家庭物资清点表</h1>
     <p class="muted">请输入家庭密码</p>
     <input type="password" id="login-pw" placeholder="密码" autocomplete="current-password" required>
@@ -31,16 +51,16 @@
   <header class="topbar">
     <div class="search-wrap">
       <input type="search" id="q" placeholder="搜索物品、备注、位置…" autocomplete="off">
-      <button type="button" id="q-clear" class="icon-btn" title="清除">✕</button>
+      <button type="button" id="q-clear" class="icon-btn" title="清除"><svg class="ico" aria-hidden="true"><use href="#i-x"></use></svg></button>
     </div>
-    <button type="button" id="filter-btn" class="icon-btn" title="筛选">⚙</button>
+    <button type="button" id="filter-btn" class="icon-btn" title="筛选"><svg class="ico" aria-hidden="true"><use href="#i-gear"></use></svg></button>
   </header>
 
   <form id="quick-form" class="quick">
-    <input id="quick-text" placeholder="✨ 说一句话录入：买了两盒酸奶放冷藏" autocomplete="off" enterkeyhint="send" maxlength="200">
+    <input id="quick-text" placeholder="说一句话录入：买了两盒酸奶放冷藏" autocomplete="off" enterkeyhint="send" maxlength="200">
     <button type="submit" class="btn small primary">录入</button>
   </form>
-  <p id="quick-hint" class="muted quick-hint">手机上点键盘的 🎤 直接说；支持"把X放到Y""买了X放Y""X用完了""X还剩N个""保质期到12月1日"等说法。</p>
+  <p id="quick-hint" class="muted quick-hint">手机上点键盘的麦克风直接说；支持"把X放到Y""买了X放Y""X用完了""X还剩N个""保质期到12月1日"等说法。</p>
 
   <div id="filters" class="filters hidden">
     <label>位置
@@ -64,29 +84,29 @@
   <div id="stats" class="stats"></div>
 
   <main id="list" class="list"></main>
-  <div id="empty" class="empty hidden">没有物品，点右下角「＋」添加</div>
+  <div id="empty" class="empty hidden">没有物品，点右下角添加按钮开始记录</div>
 
-  <button type="button" id="add-btn" class="fab" title="添加物品">＋</button>
+  <button type="button" id="add-btn" class="fab" title="添加物品"><svg aria-hidden="true"><use href="#i-plus"></use></svg></button>
 
   <nav class="tabbar">
-    <button type="button" class="tab" data-view="home">🏠 首页</button>
-    <button type="button" class="tab active" data-view="items">📦 物品</button>
-    <button type="button" class="tab" data-view="shopping">🛒 清单<span id="shop-badge" class="badge hidden"></span></button>
-    <button type="button" class="tab" data-view="plans">🗺 图纸</button>
-    <button type="button" class="tab" data-view="locations">🗄 位置</button>
-    <button type="button" class="tab" data-view="settings">⚙ 设置</button>
+    <button type="button" class="tab" data-view="home"><span class="tab-ico"><svg aria-hidden="true"><use href="#i-home"></use></svg></span>首页</button>
+    <button type="button" class="tab active" data-view="items"><span class="tab-ico"><svg aria-hidden="true"><use href="#i-box"></use></svg></span>物品</button>
+    <button type="button" class="tab" data-view="shopping"><span class="tab-ico"><svg aria-hidden="true"><use href="#i-cart"></use></svg></span>清单<span id="shop-badge" class="badge hidden"></span></button>
+    <button type="button" class="tab" data-view="plans"><span class="tab-ico"><svg aria-hidden="true"><use href="#i-map"></use></svg></span>图纸</button>
+    <button type="button" class="tab" data-view="locations"><span class="tab-ico"><svg aria-hidden="true"><use href="#i-layers"></use></svg></span>位置</button>
+    <button type="button" class="tab" data-view="settings"><span class="tab-ico"><svg aria-hidden="true"><use href="#i-gear"></use></svg></span>设置</button>
   </nav>
 </section>
 
 <!-- 首页仪表盘 -->
 <section id="view-home" class="screen subview hidden">
-  <header class="topbar"><h2>🏠 家庭物资</h2><span id="home-date" class="muted"></span></header>
+  <header class="topbar"><h2><svg class="ico" aria-hidden="true"><use href="#i-home"></use></svg>家庭物资</h2><span id="home-date" class="muted"></span></header>
   <div id="home-body" class="pad home"></div>
 </section>
 
 <!-- 购物清单 -->
 <section id="view-shopping" class="screen subview hidden">
-  <header class="topbar"><h2>🛒 购物清单</h2><button type="button" id="shop-clear" class="btn small">清除已买</button></header>
+  <header class="topbar"><h2><svg class="ico" aria-hidden="true"><use href="#i-cart"></use></svg>购物清单</h2><button type="button" id="shop-clear" class="btn small">清除已买</button></header>
   <form id="shop-form" class="quick">
     <input id="shop-text" placeholder="手动添加要买的东西" autocomplete="off" enterkeyhint="done" maxlength="60">
     <button type="submit" class="btn small primary">添加</button>
@@ -99,16 +119,16 @@
 <section id="view-plans" class="screen subview hidden">
   <header class="topbar">
     <select id="plan-select" class="topbar-select"></select>
-    <button type="button" id="plan-upload" class="btn small">＋ 图纸</button>
+    <button type="button" id="plan-upload" class="btn small"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg>图纸</button>
     <button type="button" id="plan-more" class="btn small">⋯</button>
     <input type="file" id="plan-file" accept="image/*" hidden>
   </header>
   <div id="plan-toolbar" class="plan-toolbar hidden">
-    <button type="button" id="plan-mark" class="btn small primary">📍 标记位置</button>
+    <button type="button" id="plan-mark" class="btn small primary"><svg class="ico" aria-hidden="true"><use href="#i-map-pin"></use></svg>标记位置</button>
     <span id="plan-hint" class="muted"></span>
     <span class="spacer"></span>
-    <button type="button" id="plan-zoom-out" class="btn small" title="缩小">－</button>
-    <button type="button" id="plan-zoom-in" class="btn small" title="放大">＋</button>
+    <button type="button" id="plan-zoom-out" class="btn small" title="缩小"><svg class="ico" aria-hidden="true"><use href="#i-minus"></use></svg></button>
+    <button type="button" id="plan-zoom-in" class="btn small" title="放大"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg></button>
   </div>
   <div id="plan-stage" class="plan-stage hidden">
     <div id="plan-wrap" class="plan-wrap">
@@ -118,7 +138,7 @@
   </div>
   <div id="plan-empty" class="empty hidden">
     <p>还没有图纸。</p>
-    <p class="muted">点右上角「＋ 图纸」上传户型图（拍照、截图或图片文件都可以），然后用「标记位置」把柜子、抽屉等存放位置点在图上，以后点图上的标记就能看到那里放了什么。</p>
+    <p class="muted">点右上角「图纸」上传户型图（拍照、截图或图片文件都可以），然后用「标记位置」把柜子、抽屉等存放位置点在图上，以后点图上的标记就能看到那里放了什么。</p>
   </div>
   <div id="pin-pop" class="pin-pop hidden">
     <div><strong id="pp-name"></strong> <span id="pp-count" class="muted"></span></div>
@@ -159,9 +179,9 @@
 
 <!-- 位置管理 -->
 <section id="view-locations" class="screen subview hidden">
-  <header class="topbar"><h2>存放位置</h2><button type="button" id="loc-add-root" class="btn small">＋ 房间</button></header>
+  <header class="topbar"><h2>存放位置</h2><button type="button" id="loc-add-root" class="btn small"><svg class="ico" aria-hidden="true"><use href="#i-plus"></use></svg>房间</button></header>
   <div id="loc-tree" class="loc-tree"></div>
-  <p class="muted pad">提示：点击位置名可改名或删除，「＋」可添加下级（如柜子、抽屉、层）。</p>
+  <p class="muted pad">提示：点击位置名可改名或删除，使用添加按钮可新增下级（如柜子、抽屉、层）。</p>
 </section>
 
 <!-- 设置 -->
@@ -212,7 +232,7 @@
     <div class="sheet-scroll">
       <div class="img-area" id="ed-img-area">
         <img id="ed-img" alt="" class="hidden">
-        <div id="ed-img-placeholder" class="img-placeholder">📷 拍照 / 选择图片</div>
+        <div id="ed-img-placeholder" class="img-placeholder"><svg aria-hidden="true"><use href="#i-image"></use></svg><span>拍照 / 选择图片</span></div>
         <input type="file" id="ed-img-file" accept="image/*" capture="environment" hidden>
       </div>
       <button type="button" id="ed-img-remove" class="btn small hidden">移除图片</button>

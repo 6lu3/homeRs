@@ -171,25 +171,16 @@ fi
 echo ""
 echo "[4/6] 配置 Nginx 反向代理..."
 
+# 先在 nginx.conf 的 http 块中添加限流配置
+if ! grep -q "limit_req_zone.*login_limit" /etc/nginx/nginx.conf; then
+  sed -i '/^http {/a \    # 限流：防止暴力破解登录\n    limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;' /etc/nginx/nginx.conf
+fi
+
 # 生成 Nginx 配置
 NGINX_CONF="/etc/nginx/sites-available/home-inventory"
 if [ "$USE_HTTPS" = true ]; then
   # HTTPS 配置（先监听 80，certbot 会自动改成 443）
   cat > "$NGINX_CONF" <<EOF
-server {
-    listen 80;
-    server_name $DOMAIN;
-
-    # 临时允许 certbot 验证
-    location /.well-known/acme-challenge/ {
-        root /var/www/html;
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
 server {
     listen 80;
     server_name $DOMAIN;
@@ -200,9 +191,6 @@ server {
     add_header X-Frame-Options SAMEORIGIN;
     add_header X-Content-Type-Options nosniff;
     add_header X-XSS-Protection "1; mode=block";
-
-    # 限流：防止暴力破解登录
-    limit_req_zone \$binary_remote_addr zone=login_limit:10m rate=5r/m;
 
     location /api/login {
         limit_req zone=login_limit burst=3 nodelay;
@@ -241,8 +229,6 @@ server {
 
     add_header X-Frame-Options SAMEORIGIN;
     add_header X-Content-Type-Options nosniff;
-
-    limit_req_zone \$binary_remote_addr zone=login_limit:10m rate=5r/m;
 
     location /api/login {
         limit_req zone=login_limit burst=3 nodelay;

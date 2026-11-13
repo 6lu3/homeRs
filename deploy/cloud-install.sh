@@ -104,9 +104,13 @@ if [ ! -f data/config.json ]; then
   node -e "
     const crypto = require('crypto');
     const pw = process.argv[1];
-    const hash = crypto.scryptSync(pw, 'salt', 32).toString('hex');
+    // 使用应用自己的 hashPassword 逻辑（盐:哈希）
+    function hashPassword(pw, salt = crypto.randomBytes(16).toString('hex')) {
+      return salt + ':' + crypto.scryptSync(String(pw), salt, 32).toString('hex');
+    }
+    const passwordHash = hashPassword(pw);
     const secret = crypto.randomBytes(32).toString('hex');
-    const config = { passwordHash: hash, secret };
+    const config = { passwordHash, secret };
     require('fs').writeFileSync('data/config.json', JSON.stringify(config, null, 2));
     console.log('✓ 初始密码:', pw);
   " "$INIT_PASSWORD"

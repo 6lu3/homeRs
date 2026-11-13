@@ -1,0 +1,38 @@
+# frp 客户端配置模板
+# 路径: /opt/frp/frpc.toml (Linux/开发板)
+#       C:\frp\frpc.toml (Windows，需手动创建目录)
+
+# 服务器信息（从云端 frps-install.sh 的输出中获取）
+serverAddr = "你的阿里云公网IP"    # 如 47.98.123.45
+serverPort = 7000
+auth.method = "token"
+auth.token = "从云端获取的token"   # 32位十六进制字符串
+
+# 日志
+log.to = "/var/log/frp/frpc.log"  # Windows 改为 "C:\\frp\\logs\\frpc.log"
+log.level = "info"
+log.maxDays = 7
+
+# 连接池（提升并发性能）
+transport.poolCount = 3
+
+# 健康检查（网络断开自动重连）
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+# TCP 优化（可选，KCP 模式延迟更低但占带宽）
+# transport.protocol = "kcp"
+
+# 代理配置：把本地 3000 端口映射到云端 8080
+[[proxies]]
+name = "home-inventory"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 3000
+remotePort = 8080
+
+# 健康检查（家里服务挂了自动断开云端端口，避免暴露错误信息）
+healthCheck.type = "tcp"
+healthCheck.intervalSeconds = 10
+healthCheck.timeoutSeconds = 3
+healthCheck.maxFailed = 3

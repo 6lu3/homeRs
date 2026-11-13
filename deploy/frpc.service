@@ -1,0 +1,15 @@
+[Unit]
+Description=frp client
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=root
+Restart=on-failure
+RestartSec=10s
+ExecStart=/opt/frp/frpc -c /opt/frp/frpc.toml
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

@@ -175,15 +175,16 @@ fi
 echo ""
 echo "[4/6] 配置 Nginx 反向代理..."
 
-# 先在 nginx.conf 的 http 块中添加限流配置
+# 先在 nginx.conf 的 http 块中添加限流配置（如果不存在）
 if ! grep -q "limit_req_zone.*login_limit" /etc/nginx/nginx.conf; then
-  sed -i '/^http {/a \    # 限流：防止暴力破解登录\n    limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;' /etc/nginx/nginx.conf
+  sed -i '/^http {/a \    # 防止暴力破解登录\n    limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;' /etc/nginx/nginx.conf
+  echo "✓ 已添加限流配置到 nginx.conf"
 fi
 
 # 生成 Nginx 配置
 NGINX_CONF="/etc/nginx/sites-available/home-inventory"
 if [ "$USE_HTTPS" = true ]; then
-  # HTTPS 配置（先监听 80，certbot 会自动改成 443）
+  # HTTPS 配置（初始只监听 80，certbot 会自动添加 443 配置）
   cat > "$NGINX_CONF" <<EOF
 server {
     listen 80;
@@ -279,12 +280,103 @@ echo "✓ 防火墙已配置"
 if [ "$USE_HTTPS" = true ]; then
   echo ""
   echo "[6/6] 配置 HTTPS 证书..."
+  echo ""
   echo "请先确保域名 $DOMAIN 的 DNS A 记录已指向: $PUBLIC_IP"
-  echo "然后运行以下命令获取证书（需要输入邮箱）："
-  echo ""
-  echo "  sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m 你的邮箱"
-  echo ""
-  echo "证书会自动续期（每 3 个月），无需手动干预。"
+  read -p "DNS 已生效？现在获取 HTTPS 证书？(y/N) " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]$ ]]; then
+    read -p "请输入你的邮箱: " EMAIL
+    if [ -z "$EMAIL" ]; then
+      echo "✗ 邮箱为空，跳过 HTTPS 配置"
+      echo "  稍后手动运行: sudo certbot --nginx -d $DOMAIN -m 你的邮箱 --agree-tos"
+    else
+      echo "正在获取 Let's Encrypt 证书..."
+      if certbot --nginx -d "$DOMAIN" -m "$EMAIL" --non-interactive --agree-tos; then
+        echo "✓ HTTPS 证书已配置"
+        # certbot 会修改 Nginx 配置，确保它正确
+        # 检查是否有重复的 server 块
+        if [ $(grep -c "^server {" "$NGINX_CONF") -gt 2 ]; then
+          echo "⚠ 检测到 certbot 可能生成了多余的配置，正在修复..."
+          # 备份原配置
+          cp "$NGINX_CONF" "${NGINX_CONF}.bak"
+          # 重新生成干净的配置
+          cat > "$NGINX_CONF" <<EOF
+# HTTP 跳转到 HTTPS
+server {
+    listen 80;
+    server_name $DOMAIN;
+    
+    # Let's Encrypt 验证
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+# HTTPS 主配置
+server {
+    listen 443 ssl http2;
+    server_name $DOMAIN;
+
+    # SSL 证书
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 20M;
+
+    # 安全头
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # 限流登录接口
+    location /api/login {
+        limit_req zone=login_limit burst=3 nodelay;
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # 其他路由
+    location / {
+        proxy_pass http://127.0.0.1:$APP_PORT;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # WebSocket 支持
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    access_log /var/log/nginx/home-inventory.access.log;
+    error_log /var/log/nginx/home-inventory.error.log;
+}
+EOF
+          nginx -t && systemctl reload nginx
+          echo "✓ Nginx 配置已修复"
+        fi
+      else
+        echo "✗ 证书获取失败，请检查:"
+        echo "  1. 域名 DNS 是否已生效: nslookup $DOMAIN"
+        echo "  2. 防火墙是否开放 80 端口"
+        echo "  3. 查看日志: tail -50 /var/log/letsencrypt/letsencrypt.log"
+      fi
+    fi
+  else
+    echo "跳过 HTTPS 配置，稍后手动运行:"
+    echo "  sudo certbot --nginx -d $DOMAIN -m 你的邮箱 --agree-tos"
+  fi
 else
   echo ""
   echo "[6/6] 跳过 HTTPS 配置"
@@ -297,12 +389,16 @@ echo "✓ 部署完成！"
 echo "=========================================="
 echo ""
 if [ "$USE_HTTPS" = true ]; then
-  echo "访问地址（等 DNS 生效后）:"
-  echo "  http://$DOMAIN  (将自动跳转 HTTPS)"
-  echo ""
-  echo "下一步："
-  echo "  1. 确保域名 $DOMAIN 的 A 记录指向 $PUBLIC_IP"
-  echo "  2. 运行: sudo certbot --nginx -d $DOMAIN -m 你的邮箱"
+  if [ -f /etc/letsencrypt/live/$DOMAIN/fullchain.pem ]; then
+    echo "访问地址:"
+    echo "  https://$DOMAIN"
+  else
+    echo "访问地址（HTTP，未配置证书）:"
+    echo "  http://$DOMAIN"
+    echo ""
+    echo "配置 HTTPS:"
+    echo "  sudo certbot --nginx -d $DOMAIN -m 你的邮箱 --agree-tos"
+  fi
 else
   echo "访问地址:"
   echo "  http://$PUBLIC_IP"
@@ -311,11 +407,16 @@ echo ""
 echo "初始密码: $INIT_PASSWORD"
 echo ""
 echo "常用命令:"
-echo "  查看日志: journalctl -u home-inventory -f"
-echo "  重启服务: systemctl restart home-inventory"
-echo "  查看状态: systemctl status home-inventory"
-echo "  查看 Nginx 日志: tail -f /var/log/nginx/home-inventory.access.log"
+echo "  查看应用日志: sudo journalctl -u home-inventory -f"
+echo "  重启应用: sudo systemctl restart home-inventory"
+echo "  查看应用状态: sudo systemctl status home-inventory"
+echo "  查看 Nginx 日志: sudo tail -f /var/log/nginx/home-inventory.access.log"
+echo "  测试应用端口: curl http://127.0.0.1:$APP_PORT/api/me"
 echo ""
 echo "数据目录: $APP_DIR/data"
+echo "配置文件: $APP_DIR/data/config.json"
 echo "备份命令: tar -czf ~/backup-\$(date +%F).tar.gz $APP_DIR/data"
+echo ""
+echo "重置密码（如果登录失败）:"
+echo "  cd $APP_DIR && sudo node -e \"const c=require('crypto'),f=require('fs');function h(p,s=c.randomBytes(16).toString('hex')){return s+':'+c.scryptSync(p,s,32).toString('hex')}const cfg=JSON.parse(f.readFileSync('data/config.json','utf8'));cfg.passwordHash=h('$INIT_PASSWORD');f.writeFileSync('data/config.json',JSON.stringify(cfg,null,2));console.log('密码已重置为: $INIT_PASSWORD')\" && sudo systemctl restart home-inventory"
 echo ""

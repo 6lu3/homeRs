@@ -123,6 +123,30 @@ db.exec(`
     );
   `);
 }
+// 每周菜单：餐 → 菜 → 食材（级联删除；食材引用的物品被删时置空）
+db.exec(`
+  CREATE TABLE IF NOT EXISTS menu_meals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    meal TEXT NOT NULL,            -- breakfast | lunch | dinner
+    UNIQUE(date, meal)
+  );
+  CREATE INDEX IF NOT EXISTS idx_menu_meals_date ON menu_meals(date);
+  CREATE TABLE IF NOT EXISTS menu_dishes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meal_id INTEGER NOT NULL REFERENCES menu_meals(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    sort INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS menu_ingredients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    dish_id INTEGER NOT NULL REFERENCES menu_dishes(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    item_id INTEGER REFERENCES items(id) ON DELETE SET NULL,
+    quantity REAL,
+    unit TEXT NOT NULL DEFAULT ''
+  );
+`);
 
 // 首次运行：预置常见位置，方便直接上手
 if (db.prepare('SELECT COUNT(*) AS n FROM locations').get().n === 0) {
@@ -615,6 +639,152 @@ route('DELETE', /^\/api\/shopping$/, (req, res) => { // 清掉已勾选
   const n = db.prepare('DELETE FROM shopping_extra WHERE done = 1').run().changes;
   json(res, 200, { removed: n });
 });
+// ---------- 每周菜单（纯逻辑见 lib/menu.js） ----------
+const menu = require('./lib/menu');
+const MEALS = ['breakfast', 'lunch', 'dinner'];
+function menuDate(s) {
+  try { menu.weekStart(s); return s; } catch (e) { throw new HttpError(400, e.message); }
+}
+function menuWeekStart(s) {
+  try { return menu.weekStart(s); } catch (e) { throw new HttpError(400, e.message); }
+}
+// 某些餐的菜（含食材），按 menu_dishes 行给出；meals 为 menu_meals 行
+function dishesOfMeals(mealIds) {
+  if (!mealIds.length) return new Map();
+  const ph = mealIds.map(() => '?').join(',');
+  const dishes = db.prepare(`SELECT id, meal_id, name FROM menu_dishes WHERE meal_id IN (${ph}) ORDER BY sort, id`).all(...mealIds);
+  const byDish = new Map();
+  if (dishes.length) {
+    const dph = dishes.map(() => '?').join(',');
+    for (const g of db.prepare(`SELECT id, dish_id, name, item_id, quantity, unit FROM menu_ingredients WHERE dish_id IN (${dph}) ORDER BY id`).all(...dishes.map(d => d.id))) {
+      if (!byDish.has(g.dish_id)) byDish.set(g.dish_id, []);
+      byDish.get(g.dish_id).push({ id: g.id, name: g.name, item_id: g.item_id, quantity: g.quantity, unit: g.unit });
+    }
+  }
+  const byMeal = new Map();
+  for (const d of dishes) {
+    if (!byMeal.has(d.meal_id)) byMeal.set(d.meal_id, []);
+    byMeal.get(d.meal_id).push({ id: d.id, name: d.name, ingredients: byDish.get(d.id) || [] });
+  }
+  return byMeal;
+}
+function weekMeals(start, end) {
+  return db.prepare('SELECT id, date, meal FROM menu_meals WHERE date >= ? AND date <= ? ORDER BY date, id').all(start, end);
+}
+route('GET', /^\/api\/menu\/week$/, (req, res, _m, url) => {
+  const start = menuWeekStart(url.searchParams.get('start'));
+  const end = menu.addDays(start, 6);
+  const rows = weekMeals(start, end);
+  const dishes = dishesOfMeals(rows.map(r => r.id));
+  const days = Array.from({ length: 7 }, (_, i) => ({ date: menu.addDays(start, i), meals: { breakfast: [], lunch: [], dinner: [] } }));
+  for (const r of rows) {
+    const day = days.find(d => d.date === r.date);
+    if (day && day.meals[r.meal]) day.meals[r.meal] = dishes.get(r.id) || [];
+  }
+  json(res, 200, { start, end, days });
+});
+route('PUT', /^\/api\/menu\/meal$/, async (req, res) => {
+  const b = await readJson(req);
+  const date = menuDate(b.date);
+  if (!MEALS.includes(b.meal)) throw new HttpError(400, '餐次无效');
+  if (!Array.isArray(b.dishes)) throw new HttpError(400, '菜品格式错误');
+  // 先整理校验，再开事务
+  const clean = [];
+  for (const d of b.dishes) {
+    const name = String((d && d.name) ?? '').trim();
+    if (!name) continue;
+    const ings = [];
+    for (const g of Array.isArray(d.ingredients) ? d.ingredients : []) {
+      const gname = String((g && g.name) ?? '').trim();
+      if (!gname) continue;
+      let quantity = null;
+      if (g.quantity !== undefined && g.quantity !== null && g.quantity !== '') {
+        quantity = typeof g.quantity === 'number' || (typeof g.quantity === 'string' && g.quantity.trim() !== '') ? Number(g.quantity) : NaN;
+        if (!Number.isFinite(quantity) || quantity < 0) throw new HttpError(400, '数量必须是非负数字');
+      }
+      let item_id = g.item_id == null || g.item_id === '' ? null : Number(g.item_id);
+      if (item_id != null && !db.prepare('SELECT 1 FROM items WHERE id = ?').get(item_id)) item_id = null;
+      ings.push({ name: gname, item_id, quantity, unit: String(g.unit ?? '').trim() });
+    }
+    clean.push({ name, ings });
+  }
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM menu_meals WHERE date = ? AND meal = ?').run(date, b.meal);
+    if (clean.length) {
+      const mealId = db.prepare('INSERT INTO menu_meals(date, meal) VALUES(?, ?)').run(date, b.meal).lastInsertRowid;
+      const insDish = db.prepare('INSERT INTO menu_dishes(meal_id, name, sort) VALUES(?, ?, ?)');
+      const insIng = db.prepare('INSERT INTO menu_ingredients(dish_id, name, item_id, quantity, unit) VALUES(?, ?, ?, ?, ?)');
+      clean.forEach((d, i) => {
+        const dishId = insDish.run(mealId, d.name, i).lastInsertRowid;
+        for (const g of d.ings) insIng.run(dishId, g.name, g.item_id, g.quantity, g.unit);
+      });
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  const meal = db.prepare('SELECT id FROM menu_meals WHERE date = ? AND meal = ?').get(date, b.meal);
+  json(res, 200, meal ? (dishesOfMeals([meal.id]).get(meal.id) || []) : []);
+});
+// 菜名联想：不同菜名按最近出现日期倒序，带出最近一次的食材
+route('GET', /^\/api\/menu\/suggest$/, (req, res, _m, url) => {
+  const q = (url.searchParams.get('q') || '').trim();
+  const rows = db.prepare('SELECT d.id, d.name FROM menu_dishes d JOIN menu_meals m ON m.id = d.meal_id WHERE (? = \'\' OR instr(d.name, ?) > 0) ORDER BY m.date DESC, d.id DESC').all(q, q);
+  const seen = new Set(); const picked = [];
+  for (const r of rows) {
+    if (seen.has(r.name)) continue;
+    seen.add(r.name); picked.push(r);
+    if (picked.length >= 8) break;
+  }
+  const ings = new Map();
+  if (picked.length) {
+    for (const g of db.prepare(`SELECT dish_id, name, item_id, quantity, unit FROM menu_ingredients WHERE dish_id IN (${picked.map(() => '?').join(',')}) ORDER BY id`).all(...picked.map(p => p.id))) {
+      if (!ings.has(g.dish_id)) ings.set(g.dish_id, []);
+      ings.get(g.dish_id).push({ name: g.name, item_id: g.item_id, quantity: g.quantity, unit: g.unit });
+    }
+  }
+  json(res, 200, picked.map(p => ({ name: p.name, ingredients: ings.get(p.id) || [] })));
+});
+route('POST', /^\/api\/menu\/purchase\/preview$/, async (req, res) => {
+  const b = await readJson(req);
+  const start = menuWeekStart(b.start);
+  const rows = weekMeals(start, menu.addDays(start, 6));
+  const byMeal = dishesOfMeals(rows.map(r => r.id));
+  const dishes = rows.flatMap(r => byMeal.get(r.id) || []);
+  const items = db.prepare("SELECT id, name, quantity, unit FROM items WHERE deleted_at = ''").all();
+  const shopping = db.prepare('SELECT name FROM shopping_extra WHERE done = 0').all();
+  const out = menu.computePurchase({ dishes, items, shopping });
+  for (const k of Object.keys(out)) for (const line of out[k]) line.note = menu.buildNote(line);
+  json(res, 200, out);
+});
+route('POST', /^\/api\/menu\/purchase$/, async (req, res) => {
+  const b = await readJson(req);
+  if (!Array.isArray(b.lines)) throw new HttpError(400, '格式错误');
+  const norm = s => String(s ?? '').trim().toLowerCase();
+  const listed = new Set(db.prepare('SELECT name FROM shopping_extra WHERE done = 0').all().map(r => norm(r.name)));
+  const ins = db.prepare('INSERT INTO shopping_extra(name,note,created_at) VALUES(?,?,?)');
+  let added = 0, skipped = 0;
+  db.exec('BEGIN');
+  try {
+    for (const l of b.lines) {
+      const name = String((l && l.name) ?? '').trim();
+      if (!name || listed.has(norm(name))) { skipped++; continue; }
+      ins.run(name, String(l.note ?? '').trim(), now());
+      listed.add(norm(name));
+      added++;
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  json(res, 200, { added, skipped });
+});
+// 三个月前的菜单自动清理（日期用服务端本地日期）；启动时一次，之后每 6 小时
+function purgeOldMenus() {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return Number(db.prepare('DELETE FROM menu_meals WHERE date < ?').run(menu.purgeBefore(today)).changes);
+}
+purgeOldMenus();
+setInterval(purgeOldMenus, 6 * 3600e3).unref();
+
 // 买回来了：数量补到最低库存（或指定数量）
 route('POST', /^\/api\/items\/(\d+)\/bought$/, async (req, res, [id]) => {
   const cur = db.prepare(`SELECT * FROM items WHERE id = ? AND deleted_at = ''`).get(Number(id));

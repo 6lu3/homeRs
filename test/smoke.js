@@ -137,6 +137,65 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
   r = await call('DELETE', `/api/items/${yogurt.id}?purge=1`);
   assert(r.status === 200 && !(await call('GET', '/api/trash')).body.some(i => i.id === yogurt.id), '彻底删除');
 
+  // ---- 每周菜单 ----
+  {
+    const W = '2030-01-07', W2 = '2030-01-08';
+    const saved = cookie; cookie = '';
+    r = await call('GET', `/api/menu/week?start=${W}`);
+    assert(r.status === 401, '菜单：未登录被拒绝');
+    cookie = saved;
+    for (const [d, m] of [[W, 'lunch'], [W2, 'dinner']]) await json('PUT', '/api/menu/meal', { date: d, meal: m, dishes: [] });
+    r = await call('GET', '/api/menu/week?start=2030-01-10');
+    assert(r.status === 200 && r.body.start === W && r.body.end === '2030-01-13' && r.body.days.length === 7 && Array.isArray(r.body.days[0].meals.lunch) && r.body.days[0].meals.lunch.length === 0, '菜单：周四归一到周一，7 天');
+    r = await call('GET', '/api/menu/week?start=abc');
+    assert(r.status === 400, '菜单：非法 start 400');
+    r = await json('PUT', '/api/menu/meal', { date: '2030-13-45', meal: 'lunch', dishes: [] });
+    assert(r.status === 400, '菜单：非法 date 400');
+    r = await json('PUT', '/api/menu/meal', { date: W, meal: 'brunch', dishes: [] });
+    assert(r.status === 400, '菜单：非法餐次 400');
+    r = await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: [{ name: '番茄炒蛋', ingredients: [{ name: '番茄' }, { name: '鸡蛋', quantity: 4, unit: '个' }] }, { name: '   ' }] });
+    assert(r.status === 200 && r.body.length === 1 && r.body[0].ingredients.length === 2, '菜单：保存一餐，空名菜被丢弃');
+    r = await call('GET', `/api/menu/week?start=${W}`);
+    assert(r.body.days[0].meals.lunch[0].name === '番茄炒蛋', '菜单：读回已保存的菜');
+    r = await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: [{ name: 'x', ingredients: [{ name: 'y', quantity: -1 }] }] });
+    assert(r.status === 400, '菜单：负数数量 400');
+    r = await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: [{ name: 'x', ingredients: [{ name: 'y', quantity: 'abc' }] }] });
+    assert(r.status === 400, '菜单：非数字数量 400');
+    r = await call('GET', `/api/menu/week?start=${W}`);
+    assert(r.body.days[0].meals.lunch[0].name === '番茄炒蛋', '菜单：校验失败不改动原数据');
+    r = await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: [{ name: '青菜' }] });
+    assert(r.status === 200 && r.body.length === 1 && r.body[0].name === '青菜', '菜单：整餐替换');
+    r = await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: [] });
+    assert(r.status === 200 && Array.isArray(r.body) && r.body.length === 0 && (await call('GET', `/api/menu/week?start=${W}`)).body.days[0].meals.lunch.length === 0, '菜单：清空一餐');
+
+    assert(!(await call('GET', '/api/items?q=番茄')).body.length, '菜单：库存里没有番茄（前置）');
+    const tomato = [{ name: '番茄炒蛋', ingredients: [{ name: '番茄' }, { name: '鸡蛋', quantity: 4, unit: '个' }] }];
+    await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: tomato });
+    await json('PUT', '/api/menu/meal', { date: W2, meal: 'dinner', dishes: tomato });
+    r = await call('GET', `/api/menu/suggest?q=${encodeURIComponent('番茄')}`);
+    assert(r.status === 200 && r.body[0].name === '番茄炒蛋' && r.body[0].ingredients.some(i => i.name === '番茄'), '菜单：菜名联想带出食材');
+    r = await json('POST', '/api/menu/purchase/preview', { start: W });
+    assert(r.status === 200 && r.body.need.some(l => l.name === '番茄' && l.servings === 2), '菜单：采购预览需买番茄×2');
+    r = await json('POST', '/api/menu/purchase', { lines: [{ name: '番茄', note: '来自本周菜单：番茄炒蛋×2 · 共 2 份' }] });
+    assert(r.status === 200 && r.body.added === 1 && r.body.skipped === 0, '菜单：加入购物清单');
+    r = await json('POST', '/api/menu/purchase', { lines: [{ name: '番茄', note: 'x' }] });
+    assert(r.body.added === 0 && r.body.skipped === 1, '菜单：重复加入被跳过');
+    r = await call('GET', '/api/shopping');
+    const tom = r.body.extra.find(e => e.name === '番茄');
+    assert(tom && tom.note.startsWith('来自本周菜单'), '菜单：购物清单里有番茄');
+    if (tom) await call('DELETE', `/api/shopping/${tom.id}`);
+    r = await json('POST', '/api/menu/purchase/preview', { start: '2030-02-04' });
+    assert(r.body.need.length === 0 && r.body.enough.length === 0 && r.body.exists.length === 0, '菜单：空周预览为空');
+
+    r = await json('POST', '/api/items', { name: '菜单测试物品', quantity: 1 });
+    const tmpItem = r.body;
+    await json('PUT', '/api/menu/meal', { date: W, meal: 'lunch', dishes: [{ name: '番茄炒蛋', ingredients: [{ name: '菜单测试物品', item_id: tmpItem.id }] }] });
+    await call('DELETE', `/api/items/${tmpItem.id}?purge=1`);
+    r = await call('GET', `/api/menu/week?start=${W}`);
+    assert(r.status === 200 && r.body.days[0].meals.lunch[0].ingredients[0].item_id === null, '菜单：物品被彻底删除后食材 item_id 置空');
+    for (const [d, m] of [[W, 'lunch'], [W2, 'dinner']]) await json('PUT', '/api/menu/meal', { date: d, meal: m, dishes: [] });
+  }
+
   // 清理（只删本测试创建的数据）
   for (const i of (await call('GET', '/api/items')).body) if (['酸奶', '创可贴, 大号', '螺丝刀'].includes(i.name)) await call('DELETE', `/api/items/${i.id}?purge=1`);
   r = await json('DELETE', `/api/locations/${shelf.id}`);

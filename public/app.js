@@ -489,10 +489,10 @@
     el.style.top = (ir.bottom - br.top + box.scrollTop + 2) + 'px';
     el.style.left = Math.max(0, ir.left - br.left + box.scrollLeft) + 'px';
     el.style.width = Math.max(ir.width, 160) + 'px';
-    // 用 mousedown 选取，避免输入框先失焦导致列表消失
-    el.addEventListener('mousedown', e => {
+    // mousedown 只阻止默认行为（输入框保持焦点）；真正的选取放在 click 里，避免手机上点穿
+    el.addEventListener('mousedown', e => { if (e.target.closest('.sug-item')) e.preventDefault(); });
+    el.addEventListener('click', e => {
       const b = e.target.closest('.sug-item'); if (!b) return;
-      e.preventDefault();
       const o = options[Number(b.dataset.i)];
       hideSug();
       o.pick();
@@ -561,6 +561,8 @@
   });
   $('#me-save').addEventListener('click', async () => {
     if (mealEdit.saving) return;
+    const orphan = $$('#me-list .dish-block').some(b => !$('.dish-name', b).value.trim() && $$('.ing-name', b).some(i => i.value.trim()));
+    if (orphan) { toast('请填写菜名'); return; }
     const dishes = $$('#me-list .dish-block').map(b => ({
       name: $('.dish-name', b).value,
       ingredients: $$('.ing-row', b).map(r => ({
@@ -608,7 +610,11 @@
     try { r = await postJson('/api/menu/purchase/preview', { start: menuState.start }); }
     catch (err) { purchase.busy = false; toast(err.message); return; }
     purchase.busy = false;
-    if (!r || !PURCHASE_GROUPS.some(g => (r[g.key] || []).length)) { toast('本周还没有菜单'); return; }
+    if (!r || !PURCHASE_GROUPS.some(g => (r[g.key] || []).length)) {
+      const hasDish = menuState.week && menuState.week.days.some(d => Object.values(d.meals || {}).some(m => (m || []).length));
+      toast(hasDish ? '本周的菜还没有填写食材' : '本周还没有菜单');
+      return;
+    }
     purchase.lines = [];
     $('#pc-list').innerHTML = PURCHASE_GROUPS.map(g => {
       const rows = r[g.key] || [];
@@ -634,6 +640,7 @@
       purchase.busy = false;
       closePurchase();
       toast(`已加入 ${res.added} 项，跳过 ${res.skipped} 项已有`);
+      renderShopping().catch(() => {});  // 顺带刷新底部导航的购物角标
     } catch (err) { purchase.busy = false; updatePurchaseOk(); toast(err.message); }
   });
   $('#tools-back').addEventListener('click', () => switchView('home'));

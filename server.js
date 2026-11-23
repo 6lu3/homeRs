@@ -146,6 +146,9 @@ db.exec(`
     quantity REAL,
     unit TEXT NOT NULL DEFAULT ''
   );
+  CREATE INDEX IF NOT EXISTS idx_menu_dishes_meal ON menu_dishes(meal_id);
+  CREATE INDEX IF NOT EXISTS idx_menu_ing_dish ON menu_ingredients(dish_id);
+  CREATE INDEX IF NOT EXISTS idx_menu_ing_item ON menu_ingredients(item_id);
 `);
 
 // 首次运行：预置常见位置，方便直接上手
@@ -684,7 +687,7 @@ route('GET', /^\/api\/menu\/week$/, (req, res, _m, url) => {
   json(res, 200, { start, end, days });
 });
 route('PUT', /^\/api\/menu\/meal$/, async (req, res) => {
-  const b = await readJson(req);
+  const b = (await readJson(req)) || {};
   const date = menuDate(b.date);
   if (!MEALS.includes(b.meal)) throw new HttpError(400, '餐次无效');
   if (!Array.isArray(b.dishes)) throw new HttpError(400, '菜品格式错误');
@@ -745,7 +748,7 @@ route('GET', /^\/api\/menu\/suggest$/, (req, res, _m, url) => {
   json(res, 200, picked.map(p => ({ name: p.name, ingredients: ings.get(p.id) || [] })));
 });
 route('POST', /^\/api\/menu\/purchase\/preview$/, async (req, res) => {
-  const b = await readJson(req);
+  const b = (await readJson(req)) || {};
   const start = menuWeekStart(b.start);
   const rows = weekMeals(start, menu.addDays(start, 6));
   const byMeal = dishesOfMeals(rows.map(r => r.id));
@@ -757,19 +760,28 @@ route('POST', /^\/api\/menu\/purchase\/preview$/, async (req, res) => {
   json(res, 200, out);
 });
 route('POST', /^\/api\/menu\/purchase$/, async (req, res) => {
-  const b = await readJson(req);
+  const b = (await readJson(req)) || {};
   if (!Array.isArray(b.lines)) throw new HttpError(400, '格式错误');
   const norm = s => String(s ?? '').trim().toLowerCase();
   const listed = new Set(db.prepare('SELECT name FROM shopping_extra WHERE done = 0').all().map(r => norm(r.name)));
   const ins = db.prepare('INSERT INTO shopping_extra(name,note,created_at) VALUES(?,?,?)');
   let added = 0, skipped = 0;
+  // 同一请求里同名（规范化后）的行合并成一条，备注用「；」连接
+  const merged = new Map();
+  for (const l of b.lines) {
+    const name = String((l && l.name) ?? '').trim();
+    if (!name) { skipped++; continue; }
+    const note = String((l && l.note) ?? '').trim();
+    const k = norm(name);
+    if (merged.has(k)) { if (note) merged.get(k).notes.push(note); }
+    else merged.set(k, { name, notes: note ? [note] : [] });
+  }
   db.exec('BEGIN');
   try {
-    for (const l of b.lines) {
-      const name = String((l && l.name) ?? '').trim();
-      if (!name || listed.has(norm(name))) { skipped++; continue; }
-      ins.run(name, String(l.note ?? '').trim(), now());
-      listed.add(norm(name));
+    for (const [k, m] of merged) {
+      if (listed.has(k)) { skipped++; continue; }
+      ins.run(m.name, m.notes.join('；'), now());
+      listed.add(k);
       added++;
     }
     db.exec('COMMIT');

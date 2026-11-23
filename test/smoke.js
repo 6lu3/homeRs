@@ -184,6 +184,12 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     const tom = r.body.extra.find(e => e.name === '番茄');
     assert(tom && tom.note.startsWith('来自本周菜单'), '菜单：购物清单里有番茄');
     if (tom) await call('DELETE', `/api/shopping/${tom.id}`);
+    r = await json('POST', '/api/menu/purchase', { lines: [{ name: '菜单合并测试', note: '甲' }, { name: ' 菜单合并测试 ', note: '乙' }] });
+    assert(r.status === 200 && r.body.added === 1 && r.body.skipped === 0, '菜单：同请求同名行合并为一条');
+    r = await call('GET', '/api/shopping');
+    const mg = r.body.extra.filter(e => e.name === '菜单合并测试');
+    assert(mg.length === 1 && mg[0].note === '甲；乙', '菜单：合并后备注用「；」连接');
+    for (const e of mg) await call('DELETE', `/api/shopping/${e.id}`);
     r = await json('POST', '/api/menu/purchase/preview', { start: '2030-02-04' });
     assert(r.body.need.length === 0 && r.body.enough.length === 0 && r.body.exists.length === 0, '菜单：空周预览为空');
 

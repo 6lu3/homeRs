@@ -311,6 +311,22 @@
   </div>
 </div>
 
+<!-- 每周菜单：编辑某一餐 -->
+<div id="menu-editor" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="me-cancel">取消</button>
+      <strong id="me-title"></strong>
+      <button type="button" class="btn small primary" id="me-save">保存</button>
+    </div>
+    <div class="sheet-scroll">
+      <div id="me-list"></div>
+      <button type="button" class="btn block" id="me-add">＋ 添加一道菜</button>
+    </div>
+  </div>
+</div>
+
 <!-- 通用对话框（代替浏览器 prompt / confirm，部分内嵌浏览器不支持原生弹窗） -->
 <div id="dialog" class="dialog hidden" role="dialog" aria-modal="true">
   <div class="dialog-backdrop"></div>

@@ -390,7 +390,113 @@
     if (view === 'tools') $('#view-tools').classList.remove('hidden');
     if (view === 'menu') { $('#view-menu').classList.remove('hidden'); enterMenu(); }
   }
-  function enterMenu() {}  // Task 4 实现
+  // ---------- 每周菜单 ----------
+  const MEAL_NAMES = { breakfast: '早', lunch: '午', dinner: '晚' };
+  const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+  const menuState = { start: null, week: null };
+  const pad2 = n => String(n).padStart(2, '0');
+  // 本地日期运算（不用 toISOString，避免时区差一天）
+  const fmtLocalDate = d => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const parseLocalDate = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+  const addDaysStr = (s, n) => { const d = parseLocalDate(s); d.setDate(d.getDate() + n); return fmtLocalDate(d); };
+  const todayStr = () => fmtLocalDate(new Date());
+  function mondayOf(s) { const d = parseLocalDate(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return fmtLocalDate(d); }
+  const mdLabel = s => `${Number(s.slice(5, 7))}/${Number(s.slice(8, 10))}`;
+
+  function renderMenuWeek() {
+    const w = menuState.week;
+    if (!w) return;
+    const today = todayStr();
+    $('#menu-range').innerHTML = `${mdLabel(w.start)} – ${mdLabel(w.end)}${w.start === mondayOf(today) ? ' <span class="badge menu-cur">本周</span>' : ''}`;
+    $('#menu-body').innerHTML = `<div class="menu-week">${w.days.map(day => `
+      <div class="menu-day${day.date === today ? ' today' : ''}">
+        <div class="menu-day-h">${WEEKDAYS[parseLocalDate(day.date).getDay()]} ${mdLabel(day.date)}${day.date === today ? ' <span class="badge menu-cur">今天</span>' : ''}</div>
+        ${['breakfast', 'lunch', 'dinner'].map(m => {
+          const names = (day.meals[m] || []).map(d => esc(d.name)).join('、');
+          return `<button type="button" class="menu-meal" data-date="${esc(day.date)}" data-meal="${m}"><span class="menu-meal-k">${MEAL_NAMES[m]}</span><span class="menu-meal-v${names ? '' : ' empty'}">${names || '点击添加'}</span></button>`;
+        }).join('')}
+      </div>`).join('')}</div>`;
+  }
+  async function loadMenuWeek(start) {
+    try {
+      const week = await api('/api/menu/week?start=' + encodeURIComponent(start));
+      menuState.week = week; menuState.start = week.start;
+      renderMenuWeek();
+    } catch (err) { toast(err.message); }
+  }
+  function enterMenu() { loadMenuWeek(menuState.start || mondayOf(todayStr())); }
+  $('#menu-prev').addEventListener('click', () => loadMenuWeek(addDaysStr(menuState.start || mondayOf(todayStr()), -7)));
+  $('#menu-next').addEventListener('click', () => loadMenuWeek(addDaysStr(menuState.start || mondayOf(todayStr()), 7)));
+  $('#menu-today').addEventListener('click', () => loadMenuWeek(mondayOf(todayStr())));
+  $('#menu-body').addEventListener('click', e => {
+    const b = e.target.closest('.menu-meal');
+    if (b) openMealEditor(b.dataset.date, b.dataset.meal);
+  });
+
+  // 单餐编辑弹层
+  const mealEdit = { date: null, meal: null, saving: false };
+  function ingHtml(g = {}) {
+    return `<div class="ing-row">
+      <input class="ing-name" placeholder="食材" autocomplete="off" value="${esc(g.name || '')}" data-item-id="${g.item_id != null ? esc(g.item_id) : ''}">
+      <input class="ing-qty" inputmode="decimal" placeholder="数量" autocomplete="off" value="${g.quantity != null ? esc(g.quantity) : ''}">
+      <input class="ing-unit" placeholder="单位" autocomplete="off" value="${esc(g.unit || '')}">
+      <button type="button" class="btn small ing-del" title="删除食材" aria-label="删除食材">×</button>
+    </div>`;
+  }
+  function dishHtml(d = {}) {
+    return `<div class="dish-block">
+      <div class="dish-head">
+        <input class="dish-name" placeholder="菜名" autocomplete="off" value="${esc(d.name || '')}">
+        <button type="button" class="btn small danger dish-del">删除菜</button>
+      </div>
+      <div class="ing-list">${(d.ingredients || []).map(ingHtml).join('')}</div>
+      <button type="button" class="btn small ing-add">＋ 食材</button>
+    </div>`;
+  }
+  function openMealEditor(date, meal) {
+    mealEdit.date = date; mealEdit.meal = meal; mealEdit.saving = false;
+    const day = menuState.week && menuState.week.days.find(d => d.date === date);
+    const dishes = (day && day.meals[meal]) || [];
+    $('#me-title').textContent = `${WEEKDAYS[parseLocalDate(date).getDay()]} ${mdLabel(date)} ${MEAL_NAMES[meal]}餐`;
+    $('#me-list').innerHTML = dishes.map(dishHtml).join('');
+    $('#menu-editor').classList.remove('hidden');
+  }
+  function closeMealEditor() { $('#menu-editor').classList.add('hidden'); }
+  $('#me-cancel').addEventListener('click', closeMealEditor);
+  $('#menu-editor .sheet-backdrop').addEventListener('click', closeMealEditor);
+  $('#me-add').addEventListener('click', () => {
+    $('#me-list').insertAdjacentHTML('beforeend', dishHtml());
+    const names = $$('#me-list .dish-name'); names[names.length - 1].focus();
+  });
+  $('#me-list').addEventListener('click', e => {
+    const block = e.target.closest('.dish-block');
+    if (!block) return;
+    if (e.target.closest('.dish-del')) block.remove();
+    else if (e.target.closest('.ing-del')) e.target.closest('.ing-row').remove();
+    else if (e.target.closest('.ing-add')) {
+      $('.ing-list', block).insertAdjacentHTML('beforeend', ingHtml());
+      const names = $$('.ing-name', block); names[names.length - 1].focus();
+    }
+  });
+  $('#me-save').addEventListener('click', async () => {
+    if (mealEdit.saving) return;
+    const dishes = $$('#me-list .dish-block').map(b => ({
+      name: $('.dish-name', b).value,
+      ingredients: $$('.ing-row', b).map(r => ({
+        name: $('.ing-name', r).value,
+        item_id: Number($('.ing-name', r).dataset.itemId) || null,
+        quantity: $('.ing-qty', r).value.trim(),
+        unit: $('.ing-unit', r).value,
+      })),
+    }));
+    mealEdit.saving = true;
+    try {
+      await postJson('/api/menu/meal', { date: mealEdit.date, meal: mealEdit.meal, dishes }, 'PUT');
+    } catch (err) { mealEdit.saving = false; toast(err.message); return; }
+    mealEdit.saving = false;
+    closeMealEditor(); toast('已保存');
+    await loadMenuWeek(menuState.start);
+  });
   $('#tools-back').addEventListener('click', () => switchView('home'));
   $('#menu-back').addEventListener('click', () => switchView('tools'));
   $$('.tool-card').forEach(b => b.addEventListener('click', () => switchView(b.dataset.tool)));

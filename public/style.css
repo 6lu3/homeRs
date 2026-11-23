@@ -526,6 +526,9 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
   #view-shopping > .pad,
   #view-settings > .pad,
   #view-locations > .pad,
+  #view-tools > .pad,
+  #view-menu > .pad,
+  .menu-nav,
   .loc-tree {
     width: calc(100% - 48px);
     max-width: 760px;
@@ -582,3 +585,23 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .menu-nav { display: flex; align-items: center; gap: 8px; padding: 4px 14px 8px; }
 .menu-nav .icon-btn { border: 1px solid var(--line); background: var(--card); color: var(--text); }
 .menu-range { flex: 1; text-align: center; font-size: 15px; font-weight: 600; }
+
+.menu-nav .btn { flex: none; }
+.menu-cur { margin-left: 6px; background: var(--primary-soft); color: var(--primary-dark); }
+.menu-week { display: grid; gap: 10px; }
+.menu-day { padding: 10px 12px; border: 1px solid transparent; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); }
+.menu-day.today { border-color: var(--primary); background: var(--primary-soft); }
+.menu-day-h { margin-bottom: 4px; font-size: 14px; font-weight: 600; }
+.menu-meal { display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 8px 4px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.menu-meal:hover { background: var(--field-bg); }
+.menu-meal-k { flex: none; width: 1.5em; color: var(--muted); font-size: 13px; }
+.menu-meal-v { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.menu-meal-v.empty { color: var(--muted); }
+.dish-block { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field-bg); }
+.dish-head { display: flex; gap: 8px; margin-bottom: 8px; }
+.dish-head .dish-name { flex: 1; min-width: 0; font-weight: 600; }
+.ing-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 56px auto; gap: 6px; margin-bottom: 6px; }
+.ing-row input { min-width: 0; }
+@media (min-width: 720px) {
+  .menu-week { grid-template-columns: 1fr 1fr; }
+}

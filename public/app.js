@@ -417,12 +417,15 @@
         }).join('')}
       </div>`).join('')}</div>`;
   }
+  let menuSeq = 0;
   async function loadMenuWeek(start) {
+    const seq = ++menuSeq;
     try {
       const week = await api('/api/menu/week?start=' + encodeURIComponent(start));
+      if (seq !== menuSeq) return;  // 已有更新的请求，丢弃过期响应
       menuState.week = week; menuState.start = week.start;
       renderMenuWeek();
-    } catch (err) { toast(err.message); }
+    } catch (err) { if (seq === menuSeq) toast(err.message); }
   }
   function enterMenu() { loadMenuWeek(menuState.start || mondayOf(todayStr())); }
   $('#menu-prev').addEventListener('click', () => loadMenuWeek(addDaysStr(menuState.start || mondayOf(todayStr()), -7)));
@@ -458,7 +461,7 @@
     const day = menuState.week && menuState.week.days.find(d => d.date === date);
     const dishes = (day && day.meals[meal]) || [];
     $('#me-title').textContent = `${WEEKDAYS[parseLocalDate(date).getDay()]} ${mdLabel(date)} ${MEAL_NAMES[meal]}餐`;
-    $('#me-list').innerHTML = dishes.map(dishHtml).join('');
+    $('#me-list').innerHTML = (dishes.length ? dishes : [{}]).map(dishHtml).join('');
     $('#menu-editor').classList.remove('hidden');
   }
   function closeMealEditor() { $('#menu-editor').classList.add('hidden'); }

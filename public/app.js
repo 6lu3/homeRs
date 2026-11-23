@@ -437,7 +437,7 @@
   });
 
   // 单餐编辑弹层
-  const mealEdit = { date: null, meal: null, saving: false };
+  const mealEdit = { date: null, meal: null, saving: false, items: null, session: 0 };
   function ingHtml(g = {}) {
     return `<div class="ing-row">
       <input class="ing-name" placeholder="食材" autocomplete="off" value="${esc(g.name || '')}" data-item-id="${g.item_id != null ? esc(g.item_id) : ''}">
@@ -462,9 +462,87 @@
     const dishes = (day && day.meals[meal]) || [];
     $('#me-title').textContent = `${WEEKDAYS[parseLocalDate(date).getDay()]} ${mdLabel(date)} ${MEAL_NAMES[meal]}餐`;
     $('#me-list').innerHTML = (dishes.length ? dishes : [{}]).map(dishHtml).join('');
+    hideSug();
+    // 食材联想：本次编辑会话内缓存完整物品列表（state.items 只是当前筛选结果）；失败则静默跳过
+    const session = ++mealEdit.session;
+    mealEdit.items = null;
+    api('/api/items').then(all => { if (session === mealEdit.session && Array.isArray(all)) mealEdit.items = all; }).catch(() => {});
     $('#menu-editor').classList.remove('hidden');
   }
-  function closeMealEditor() { $('#menu-editor').classList.add('hidden'); }
+  function closeMealEditor() { hideSug(); mealEdit.session++; $('#menu-editor').classList.add('hidden'); }
+
+  // 联想列表（共享一个浮层，绝对定位于输入框下方）
+  const sug = { input: null, seq: 0 };
+  function hideSug() {
+    sug.input = null; sug.seq++;
+    const el = $('#me-sug'); if (el) el.remove();
+  }
+  function showSug(input, options) {  // options: [{ label, sub, pick }]
+    const old = $('#me-sug'); if (old) old.remove();
+    sug.input = input;
+    if (!options.length) return;
+    const box = $('#menu-editor .sheet-scroll');
+    const el = document.createElement('div');
+    el.id = 'me-sug'; el.className = 'sug-list';
+    el.innerHTML = options.map((o, i) => `<button type="button" class="sug-item" data-i="${i}">${esc(o.label)}${o.sub ? `<span class="sug-sub">${esc(o.sub)}</span>` : ''}</button>`).join('');
+    const ir = input.getBoundingClientRect(), br = box.getBoundingClientRect();
+    el.style.top = (ir.bottom - br.top + box.scrollTop + 2) + 'px';
+    el.style.left = Math.max(0, ir.left - br.left + box.scrollLeft) + 'px';
+    el.style.width = Math.max(ir.width, 160) + 'px';
+    // 用 mousedown 选取，避免输入框先失焦导致列表消失
+    el.addEventListener('mousedown', e => {
+      const b = e.target.closest('.sug-item'); if (!b) return;
+      e.preventDefault();
+      const o = options[Number(b.dataset.i)];
+      hideSug();
+      o.pick();
+    });
+    box.appendChild(el);
+  }
+  document.addEventListener('click', e => {
+    if (!sug.input) return;
+    if (e.target === sug.input || e.target.closest('#me-sug')) return;
+    hideSug();
+  });
+  let dishSugTimer = null;
+  $('#me-list').addEventListener('input', e => {
+    const t = e.target;
+    if (t.classList.contains('ing-name')) {
+      t.dataset.itemId = '';  // 手动改名即清除已关联的物品
+      const q = t.value.trim().toLowerCase();
+      const items = mealEdit.items;
+      if (!q || !items) { hideSug(); return; }
+      const seen = new Set(), opts = [];
+      for (const it of items) {
+        if (opts.length >= 6) break;
+        if (!String(it.name || '').toLowerCase().includes(q) || seen.has(it.id)) continue;
+        seen.add(it.id);
+        opts.push({ label: it.name, sub: '', pick: () => { t.value = it.name; t.dataset.itemId = String(it.id); } });
+      }
+      showSug(t, opts);
+    } else if (t.classList.contains('dish-name')) {
+      clearTimeout(dishSugTimer);
+      const q = t.value.trim();
+      if (!q) { hideSug(); return; }
+      const seq = ++sug.seq;
+      dishSugTimer = setTimeout(async () => {
+        let list;
+        try { list = await api('/api/menu/suggest?q=' + encodeURIComponent(q)); } catch { return; }
+        if (seq !== sug.seq || !t.isConnected || t.value.trim() !== q || !Array.isArray(list)) return;
+        showSug(t, list.slice(0, 8).map(d => ({
+          label: d.name,
+          sub: (d.ingredients || []).map(g => g.name).join('、'),
+          pick: () => {
+            t.value = d.name;
+            const block = t.closest('.dish-block');
+            const rows = $$('.ing-row', block);
+            const blank = rows.every(r => !$('.ing-name', r).value.trim() && !$('.ing-qty', r).value.trim() && !$('.ing-unit', r).value.trim());
+            if (blank && (d.ingredients || []).length) $('.ing-list', block).innerHTML = d.ingredients.map(ingHtml).join('');
+          },
+        })));
+      }, 250);
+    }
+  });
   $('#me-cancel').addEventListener('click', closeMealEditor);
   $('#menu-editor .sheet-backdrop').addEventListener('click', closeMealEditor);
   $('#me-add').addEventListener('click', () => {
@@ -499,6 +577,64 @@
     mealEdit.saving = false;
     closeMealEditor(); toast('已保存');
     await loadMenuWeek(menuState.start);
+  });
+  // 按菜单生成采购：先预览、勾选确认，再加入购物清单
+  const purchase = { lines: [], busy: false };
+  const PURCHASE_GROUPS = [
+    { key: 'need', title: '需要买', checked: true, disabled: false },
+    { key: 'enough', title: '库存里有，默认够用', checked: false, disabled: false },
+    { key: 'exists', title: '清单里已有', checked: false, disabled: true },
+  ];
+  function purchaseRowHtml(l, idx, g) {
+    const amount = l.kind === 'servings' ? `${l.servings} 份` : `${fmtQty(l.quantity)}${esc(l.unit || '')}`;
+    const stock = l.stock ? `库存 ${fmtQty(l.stock.quantity)}${esc(l.stock.unit || '')}` : '库存没有';
+    const dishes = (l.dishes || []).map(d => esc(d.name) + (d.count > 1 ? '×' + d.count : '')).join('、');
+    return `<div class="pc-row${g.disabled ? ' disabled' : ''}" data-i="${idx}">
+      <input type="checkbox" class="pc-ck" ${g.checked ? 'checked' : ''} ${g.disabled ? 'disabled' : ''} aria-label="勾选">
+      <div class="pc-main">
+        <input class="pc-name" value="${esc(l.name)}" ${g.disabled ? 'disabled' : ''}>
+        <div class="pc-meta">${amount} · ${stock}${dishes ? ' · ' + dishes : ''}</div>
+      </div>
+    </div>`;
+  }
+  function updatePurchaseOk() {
+    $('#pc-ok').disabled = purchase.busy || !$$('#pc-list .pc-row:not(.disabled) .pc-ck:checked').length;
+  }
+  function closePurchase() { $('#menu-purchase-sheet').classList.add('hidden'); }
+  $('#menu-purchase').addEventListener('click', async () => {
+    if (purchase.busy) return;
+    purchase.busy = true;
+    let r;
+    try { r = await postJson('/api/menu/purchase/preview', { start: menuState.start }); }
+    catch (err) { purchase.busy = false; toast(err.message); return; }
+    purchase.busy = false;
+    if (!r || !PURCHASE_GROUPS.some(g => (r[g.key] || []).length)) { toast('本周还没有菜单'); return; }
+    purchase.lines = [];
+    $('#pc-list').innerHTML = PURCHASE_GROUPS.map(g => {
+      const rows = r[g.key] || [];
+      if (!rows.length) return '';
+      return `<h3 class="pc-group">${g.title}</h3>` + rows.map(l => { purchase.lines.push(l); return purchaseRowHtml(l, purchase.lines.length - 1, g); }).join('');
+    }).join('');
+    updatePurchaseOk();
+    $('#menu-purchase-sheet').classList.remove('hidden');
+  });
+  $('#pc-list').addEventListener('change', updatePurchaseOk);
+  $('#pc-cancel').addEventListener('click', closePurchase);
+  $('#menu-purchase-sheet .sheet-backdrop').addEventListener('click', closePurchase);
+  $('#pc-ok').addEventListener('click', async () => {
+    if (purchase.busy) return;
+    const lines = $$('#pc-list .pc-row:not(.disabled)').filter(row => $('.pc-ck', row).checked).map(row => ({
+      name: $('.pc-name', row).value.trim(),
+      note: purchase.lines[Number(row.dataset.i)].note,
+    })).filter(l => l.name);
+    if (!lines.length) { toast('没有勾选的项目'); return; }
+    purchase.busy = true; updatePurchaseOk();
+    try {
+      const res = await postJson('/api/menu/purchase', { lines });
+      purchase.busy = false;
+      closePurchase();
+      toast(`已加入 ${res.added} 项，跳过 ${res.skipped} 项已有`);
+    } catch (err) { purchase.busy = false; updatePurchaseOk(); toast(err.message); }
   });
   $('#tools-back').addEventListener('click', () => switchView('home'));
   $('#menu-back').addEventListener('click', () => switchView('tools'));

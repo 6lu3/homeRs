@@ -602,6 +602,20 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .dish-head .dish-name { flex: 1; min-width: 0; font-weight: 600; }
 .ing-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px 56px auto; gap: 6px; margin-bottom: 6px; }
 .ing-row input { min-width: 0; }
+#menu-editor .sheet-scroll { position: relative; }
+.sug-list { position: absolute; z-index: 5; display: flex; flex-direction: column; max-height: 240px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-btn); background: var(--card); box-shadow: var(--shadow-card); }
+.sug-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.sug-item:last-child { border-bottom: 0; }
+.sug-item:hover { background: var(--primary-soft); }
+.sug-sub { color: var(--muted); font-size: 12px; }
+.pc-group { margin: 14px 0 8px; font-size: 15px; }
+.pc-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.pc-row.disabled { opacity: .55; }
+.pc-ck { width: 20px; height: 20px; margin-top: 8px; flex: none; }
+.pc-main { flex: 1; min-width: 0; }
+.pc-name { width: 100%; }
+.pc-meta { margin-top: 4px; color: var(--muted); font-size: 13px; }
+#pc-ok:disabled { opacity: .5; cursor: not-allowed; }
 @media (min-width: 720px) {
   .menu-week { grid-template-columns: 1fr 1fr; }
 }

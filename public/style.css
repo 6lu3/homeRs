@@ -517,6 +517,7 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
   .home-recent { grid-column: 1; grid-row: 3; }
   .home-log { grid-column: 2; grid-row: 3; }
   .home-status { grid-column: 1 / -1; grid-row: 4; }
+  .home-tools { grid-column: 1 / -1; grid-row: 5; }
   .home-block { min-width: 0; }
   .home-block h3 { margin-top: 28px; }
   .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -559,7 +560,25 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
     left: 50%; 
     width: 560px; 
     max-width: calc(100% - 48px);
-    transform: translateX(-50%); 
-    border-radius: 18px; 
+    transform: translateX(-50%);
+    border-radius: 18px;
   }
 }
+
+/* 日常工具 */
+.tool-card, .home-tools { display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px; border: 0; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: all .2s ease; }
+.tool-card:hover, .home-tools:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(72, 56, 40, .1); }
+.tool-card:active, .home-tools:active { transform: scale(.98); }
+.home-tools { margin-top: 12px; }
+.tool-ico { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-btn); background: var(--primary-soft); color: var(--primary); }
+.tool-ico .ico { width: 22px; height: 22px; }
+.tool-txt { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.tool-txt b { font-size: 16px; font-weight: 600; }
+.tool-txt span { color: var(--muted); font-size: 13px; }
+.tool-card > .ico, .home-tools > .ico { color: var(--muted); }
+.tool-list { padding-top: 6px; }
+
+/* 每周菜单 */
+.menu-nav { display: flex; align-items: center; gap: 8px; padding: 4px 14px 8px; }
+.menu-nav .icon-btn { border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.menu-range { flex: 1; text-align: center; font-size: 15px; font-weight: 600; }

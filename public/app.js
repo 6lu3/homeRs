@@ -387,7 +387,13 @@
     if (view === 'settings') $('#view-settings').classList.remove('hidden');
     if (view === 'home') { $('#view-home').classList.remove('hidden'); renderHome(); }
     if (view === 'shopping') { $('#view-shopping').classList.remove('hidden'); renderShopping(); }
+    if (view === 'tools') $('#view-tools').classList.remove('hidden');
+    if (view === 'menu') { $('#view-menu').classList.remove('hidden'); enterMenu(); }
   }
+  function enterMenu() {}  // Task 4 实现
+  $('#tools-back').addEventListener('click', () => switchView('home'));
+  $('#menu-back').addEventListener('click', () => switchView('tools'));
+  $$('.tool-card').forEach(b => b.addEventListener('click', () => switchView(b.dataset.tool)));
   // 从其他页跳到物品页并打开某件物品
   async function openItemById(id) {
     switchView('items');
@@ -414,6 +420,7 @@
         ${tile(c.expiringSoon, '30 天内到期', 'warn', 'items', 'data-exp="30"')}
         ${tile(c.low + c.shoppingExtra, '待购买', 'low', 'shopping')}
       </div>
+      <button type="button" class="home-tools" data-go="tools"><span class="tool-ico">${ICO('wrench')}</span><span class="tool-txt"><b>日常工具</b><span>每周菜单等小工具</span></span>${ICO('chevron-right')}</button>
       ${d.expiring.length ? `<section class="home-block home-expiring"><h3>${ICO('clock')}快到期 / 已过期</h3><div class="home-list">${expiring}</div></section>` : ''}
       ${d.low.length ? `<section class="home-block home-low"><h3>${ICO('cart')}库存不足</h3><div class="home-list">${low}</div></section>` : ''}
       <section class="home-block home-recent"><h3>${ICO('plus-circle')}最近添加</h3><div class="home-list">${recent || '<p class="muted">还没有物品</p>'}</div></section>

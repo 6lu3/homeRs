@@ -32,6 +32,10 @@
   <symbol id="i-plus-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></symbol>
   <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6zM14 3.5v4h4M9 12h6M9 16h6"/></symbol>
   <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5 5l-8.5 8.5a2.1 2.1 0 0 1-3-3l8.5-8.5a4 4 0 0 0-2-2z"/><path d="M14.7 6.3a4 4 0 0 1 5.4-2.4l-2.4 2.4.6 1.4 1.4.6 2.4-2.4"/></symbol>
+  <symbol id="i-utensils" viewBox="0 0 24 24"><path d="M6.5 3.5v6.2a2 2 0 0 0 4 0V3.5M8.5 3.5v17"/><path d="M17.5 20.5v-17c-2.2 1.2-3.2 3.8-3.2 6.5 0 1.6 1.2 2.6 3.2 2.6"/></symbol>
+  <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
 </svg>
 
 <!-- 登录 -->
@@ -103,6 +107,37 @@
 <section id="view-home" class="screen subview hidden">
   <header class="topbar"><h2><svg class="ico" aria-hidden="true"><use href="#i-home"></use></svg>家庭物资</h2><span id="home-date" class="muted"></span></header>
   <div id="home-body" class="pad home"></div>
+</section>
+
+<!-- 日常工具 -->
+<section id="view-tools" class="screen subview hidden">
+  <header class="topbar">
+    <button type="button" id="tools-back" class="icon-btn" title="返回"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+    <h2><svg class="ico" aria-hidden="true"><use href="#i-wrench"></use></svg>日常工具</h2>
+  </header>
+  <div class="pad tool-list">
+    <button type="button" class="tool-card" data-tool="menu">
+      <span class="tool-ico"><svg class="ico" aria-hidden="true"><use href="#i-utensils"></use></svg></span>
+      <span class="tool-txt"><b>每周菜单</b><span>安排一周三餐，一键生成采购</span></span>
+      <svg class="ico" aria-hidden="true"><use href="#i-chevron-right"></use></svg>
+    </button>
+  </div>
+</section>
+
+<!-- 每周菜单 -->
+<section id="view-menu" class="screen subview hidden">
+  <header class="topbar">
+    <button type="button" id="menu-back" class="icon-btn" title="返回"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+    <h2><svg class="ico" aria-hidden="true"><use href="#i-utensils"></use></svg>每周菜单</h2>
+  </header>
+  <div class="menu-nav">
+    <button type="button" id="menu-prev" class="icon-btn" title="上一周"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+    <span id="menu-range" class="menu-range"></span>
+    <button type="button" id="menu-next" class="icon-btn" title="下一周"><svg class="ico" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+    <button type="button" id="menu-today" class="btn small">本周</button>
+  </div>
+  <div id="menu-body" class="pad"></div>
+  <div class="pad"><button type="button" id="menu-purchase" class="btn primary block">按本周菜单生成采购</button></div>
 </section>
 
 <!-- 购物清单 -->

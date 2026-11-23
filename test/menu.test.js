@@ -107,6 +107,24 @@ check('10 购物清单已有 → exists', () => {
   if (!find(r.exists, '番茄')) throw new Error('应在 exists');
 });
 
+check('11 无库存时不同单位不合并', () => {
+  const r = computePurchase({
+    dishes: [{ name: 'A', ingredients: [ing('葱', 2, '把')] }, { name: 'B', ingredients: [ing('葱', 1, '根')] }],
+    items, shopping: [],
+  });
+  const l = r.need.filter(x => x.name === '葱');
+  eq(l.map(x => [x.kind, x.quantity, x.unit]), [['qty', 2, '把'], ['qty', 1, '根']]);
+});
+check('12 同单位数量跨菜累加；test7 的 qty 行进 enough', () => {
+  const r = computePurchase({
+    dishes: [{ name: 'A', ingredients: [ing('葱', 2, '把')] }, { name: 'B', ingredients: [ing('葱', 1, '把')] }],
+    items, shopping: [],
+  });
+  eq(r.need.filter(x => x.name === '葱').map(x => x.quantity), [3]);
+  const r2 = computePurchase({ dishes: [{ name: 'A', ingredients: [ing('鸡蛋', 4, '个')] }], items, shopping: [] });
+  eq(find(r2.enough, '鸡蛋', 'qty').quantity, 4);
+});
+
 check('buildNote', () => {
   eq(buildNote({ kind: 'servings', servings: 2, quantity: null, unit: '', dishes: [{ name: '番茄炒蛋', count: 2 }] }),
     '来自本周菜单：番茄炒蛋×2 · 共 2 份');

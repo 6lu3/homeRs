@@ -30,6 +30,7 @@
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.5"/><path d="m5.5 17 4.2-4.2 2.8 2.8 2.2-2.2 3.8 3.6"/></symbol>
   <symbol id="i-map-pin" viewBox="0 0 24 24"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></symbol>
   <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8.5h3l1.6-2.2h6.8L17 8.5h3v10H4z"/><circle cx="12" cy="13.4" r="3.2"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5M9 20.5h6"/></symbol>
   <symbol id="i-plus-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></symbol>
   <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 3.5h8l4 4v13H6zM14 3.5v4h4M9 12h6M9 16h6"/></symbol>
   <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
@@ -66,9 +67,10 @@
     <input id="quick-text" placeholder="说一句话录入：买了两盒酸奶放冷藏" autocomplete="off" enterkeyhint="send" maxlength="200">
     <button type="button" id="receipt-btn" class="btn small hidden" title="拍小票录入" aria-label="拍小票录入"><svg class="ico" aria-hidden="true"><use href="#i-camera"></use></svg></button>
     <input type="file" id="receipt-file" accept="image/*" class="hidden">
+    <button type="button" id="asr-btn" class="btn small hidden" title="语音录入" aria-label="语音录入"><svg class="ico" aria-hidden="true"><use href="#i-mic"></use></svg><span class="asr-sec"></span></button>
     <button type="submit" class="btn small primary">录入</button>
   </form>
-  <p id="quick-hint" class="muted quick-hint">手机上点键盘的麦克风直接说；支持"把X放到Y""买了X放Y""X用完了""X还剩N个""保质期到12月1日"等说法。<span id="receipt-hint" class="hidden">也可以点相机拍小票。图片只发给识别服务，不会保存。</span></p>
+  <p id="quick-hint" class="muted quick-hint">手机上点键盘的麦克风直接说；支持"把X放到Y""买了X放Y""X用完了""X还剩N个""保质期到12月1日"等说法。<span id="receipt-hint" class="hidden">也可以点相机拍小票。图片只发给识别服务，不会保存。</span><span id="asr-hint" class="hidden">也可以点页面里的麦克风说话，再点一下结束；可以一口气说几件事。录音只发给识别服务，不会保存。</span></p>
 
   <div id="filters" class="filters hidden">
     <label>位置
@@ -359,6 +361,7 @@
 <div id="toast" class="toast hidden"></div>
 <script src="/menu-cal.js"></script>
 <script src="/img-scale.js"></script>
+<script src="/wav.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

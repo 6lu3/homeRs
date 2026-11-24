@@ -106,7 +106,7 @@
   }
 
   // ---------- 登录 ----------
-  function showLogin() { $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); hideSubviews(); }
+  function showLogin() { asrAbort(); $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); hideSubviews(); }
   function hideSubviews() { $$('.subview').forEach(v => v.classList.add('hidden')); }
   $('#login-form').addEventListener('submit', async e => {
     e.preventDefault();
@@ -119,6 +119,7 @@
     await Promise.all([loadLocations(), loadCategories()]);
     await Promise.all([loadItems(), loadStats()]);
     loadReceiptStatus();
+    loadAsrStatus();
   }
 
   // ---------- 加载数据 ----------
@@ -282,17 +283,19 @@
   const ACTION_LABEL = { add: ['新增', ''], restock: ['补货 +', ''], move: ['移动位置', 'info'], consume: ['减少 −', 'minus'], deplete: ['用完 → 删除', 'zero'], set_quantity: ['设为数量', 'info'], expire: ['设置到期', 'info'] };
   let cfIntents = [];
   let cfSource = 'quick'; // 本次确认卡的来源：quick（一句话）或 receipt（小票），写库存时带在 ?source= 里
-  $('#quick-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const text = $('#quick-text').value.trim(); if (!text) return;
-    const btn = e.submitter || $('#quick-form button[type=submit]'); btn.disabled = true;
+  // 一句话录入的解析流程：输入框提交和语音识别共用
+  async function runQuick(text) {
+    text = String(text || '').trim(); if (!text) return;
+    const btn = $('#quick-form button[type=submit]'); btn.disabled = true;
     try {
       const r = await postJson('/api/parse', { text });
       if (!r.intents.length) { toast('没听懂，换个说法试试，或直接点右下角添加按钮'); return; }
+      if (r.truncated) r.notice = '只处理了前 5 句，后面的没有录入，请分开说。';
       showConfirm(r);
     } catch (err) { toast(err.message, 3000); }
     finally { btn.disabled = false; }
-  });
+  }
+  $('#quick-form').addEventListener('submit', e => { e.preventDefault(); runQuick($('#quick-text').value); });
   // ---------- 拍小票录入 ----------
   async function loadReceiptStatus() {
     let on = false;
@@ -320,6 +323,91 @@
       });
     } catch (err) { toast(err.message, 4000); }
     finally { btn.disabled = false; }
+  });
+  // ---------- 语音录入 ----------
+  // state：idle（空闲）/ starting（等待麦克风权限）/ recording（录音中）/ busy（识别中）
+  const asr = { maxSeconds: 30, state: 'idle', stream: null, rec: null, chunks: [], timer: null, tick: null, started: 0 };
+  async function loadAsrStatus() {
+    let on = false;
+    try {
+      const s = await api('/api/asr/status');
+      asr.maxSeconds = s.maxSeconds || 30;
+      // 浏览器只在 HTTPS 页面允许录音；缺少录音或解码能力的浏览器不显示按钮
+      on = !!s.enabled && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder && !!(window.AudioContext || window.webkitAudioContext);
+    } catch {}
+    $('#asr-btn').classList.toggle('hidden', !on);
+    $('#asr-hint').classList.toggle('hidden', !on);
+  }
+  function asrUi(state) {
+    asr.state = state;
+    const b = $('#asr-btn');
+    b.classList.toggle('recording', state === 'recording');
+    b.disabled = state === 'busy';
+    b.title = state === 'recording' ? '再点一下结束' : '语音录入';
+    b.setAttribute('aria-label', b.title);
+  }
+  function asrCleanup() { // 释放麦克风、清掉计时器和提示，保证不留残留状态
+    clearTimeout(asr.timer); clearInterval(asr.tick); asr.timer = asr.tick = null;
+    if (asr.stream) { asr.stream.getTracks().forEach(t => t.stop()); asr.stream = null; }
+    asr.rec = null; asr.chunks = [];
+    $('#asr-btn .asr-sec').textContent = '';
+  }
+  function asrStop() { if (asr.rec && asr.rec.state === 'recording') asr.rec.stop(); }
+  function asrAbort() { // 切换页面等情况：放弃这次录音
+    if (asr.state !== 'recording') return;
+    if (asr.rec) { asr.rec.onstop = null; try { asr.rec.stop(); } catch {} }
+    asrCleanup(); asrUi('idle');
+  }
+  async function asrStart() {
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { toast('没有麦克风权限，请在浏览器设置里允许', 4000); return; }
+    let rec;
+    try { rec = new MediaRecorder(stream); }
+    catch { stream.getTracks().forEach(t => t.stop()); toast('这个浏览器暂时不支持语音录入', 4000); return; }
+    asr.stream = stream; asr.rec = rec; asr.chunks = [];
+    rec.ondataavailable = e => { if (e.data && e.data.size) asr.chunks.push(e.data); };
+    rec.onstop = () => asrFinish(rec.mimeType);
+    rec.start();
+    asr.started = Date.now();
+    asrUi('recording');
+    asr.tick = setInterval(() => { $('#asr-btn .asr-sec').textContent = Math.floor((Date.now() - asr.started) / 1000) + 's'; }, 250);
+    asr.timer = setTimeout(asrStop, asr.maxSeconds * 1000);
+  }
+  // 录音 → 解码 → 各声道平均成单声道 → 16kHz 16 位 WAV
+  async function asrToWav(blob) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AC();
+    try {
+      let buf;
+      try { buf = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+      catch { throw new Error('这个浏览器暂时不支持语音录入'); }
+      const mono = new Float32Array(buf.length);
+      for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
+      return new Blob([WavEnc.encode(mono, buf.sampleRate)], { type: 'audio/wav' });
+    } finally { try { ctx.close(); } catch {} }
+  }
+  async function asrFinish(mime) {
+    const chunks = asr.chunks, secs = (Date.now() - asr.started) / 1000;
+    asrCleanup(); asrUi('busy');
+    toast('识别中，请稍等…', 60000);
+    try {
+      const blob = new Blob(chunks, { type: mime || 'audio/webm' });
+      if (!blob.size || secs < 0.5) { toast('没听清，再说一遍试试'); return; }
+      const r = await api('/api/asr/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/wav' }, body: await asrToWav(blob) });
+      $('#toast').classList.add('hidden');
+      const text = String(r.text || '').trim().slice(0, 200);
+      if (!text) { toast('没听清，再说一遍试试'); return; }
+      $('#quick-text').value = text; // 替换输入框里原有的内容，然后和点「录入」一样解析并弹出确认卡
+      await runQuick(text);
+    } catch (err) { toast(err.message, 4000); }
+    finally { asrUi('idle'); }
+  }
+  $('#asr-btn').addEventListener('click', () => {
+    if (asr.state === 'idle') {
+      asr.state = 'starting'; // 等待权限弹窗期间忽略再次点击
+      asrStart().finally(() => { if (asr.state === 'starting') asrUi('idle'); });
+    } else if (asr.state === 'recording') asrStop();
   });
   function locationOptions(sel, create) {
     let html = '<option value="">（不设置位置）</option>';
@@ -413,6 +501,7 @@
     if (!main) $('#empty').classList.add('hidden'); else $('#empty').classList.toggle('hidden', state.items.length > 0);
     hideSubviews();
     hidePinPop();
+    if (view !== 'items') asrAbort(); // 离开物品页时放弃进行中的录音
     if (view === 'locations') { $('#view-locations').classList.remove('hidden'); renderLocations(); }
     if (view === 'plans') { $('#view-plans').classList.remove('hidden'); enterPlans(); }
     if (view === 'settings') $('#view-settings').classList.remove('hidden');

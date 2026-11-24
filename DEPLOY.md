@@ -205,6 +205,42 @@ sudo systemctl daemon-reload && sudo systemctl restart home-inventory
 
 **隐私与花费**：拍的小票图会发给你配置的识别服务，不会保存在服务器上。次数用量记在 `data/receipt-usage.json`，全家共用一个计数，重启不会清零。建议给这个功能单独申请一个 key，余额放少一点。
 
+### 语音识别（可选）
+
+物品页的麦克风按钮需要一个能听音频的识别服务。**它和小票识别是两套完全独立的配置、独立的次数计数，互不影响；没配置就不显示麦克风按钮，其他功能不受影响。**
+
+**前提：页面必须是 HTTPS**（浏览器只在安全页面允许录音）。用 `http://IP:端口` 访问时，即使配置好了也看不到麦克风按钮。HTTPS 的配法见 `deploy/CLOUD.md`（域名 + Nginx + Let's Encrypt）。
+
+在 `data/config.json` 里加一个 `asr` 对象（和 `receipt` 并列，JSON 里要用英文半角引号，前一项末尾别忘了逗号）：
+
+```json
+"asr": {
+  "url": "https://ark.cn-beijing.volces.com/api/v3/responses",
+  "key": "你的 key",
+  "model": "能听音频的模型名",
+  "format": "responses",
+  "extra": { "thinking": { "type": "disabled" } },
+  "timeoutSec": 30,
+  "dailyLimit": 100,
+  "maxSeconds": 30
+}
+```
+
+改完同样 `chmod 600 data/config.json` 并重启服务；启动日志里会提示「语音识别已启用」或配置问题。也可以用环境变量（优先于配置文件，逐项覆盖；key 请放在只有 root 能读的环境变量文件里，写法同上面小票识别的说明）：
+
+| 环境变量 | 对应字段 | 说明 |
+|---|---|---|
+| `ASR_API_URL` | `url` | 完整接口地址 |
+| `ASR_API_KEY` | `key` | 识别服务的 key，只存在于服务器，任何接口都不会返回它 |
+| `ASR_MODEL` | `model` | 能听音频的模型名 |
+| `ASR_FORMAT` | `format` | 目前只支持 `responses`（火山方舟的 Responses 接口，音频用 `input_audio` 传） |
+| `ASR_EXTRA` | `extra` | JSON 对象，合并进请求体；方舟的模型建议 `{"thinking":{"type":"disabled"}}`，否则会很慢 |
+| `ASR_TIMEOUT_S` | `timeoutSec` | 超时秒数，默认 30 |
+| `ASR_DAILY_LIMIT` | `dailyLimit` | 每天最多识别几次，默认 100，`0` 表示不限 |
+| `ASR_MAX_SECONDS` | `maxSeconds` | 单段录音最长几秒，默认 30，最大 60。识别服务如果拒绝较长的录音，调小它即可 |
+
+`url`、`key`、`model` 三项齐全才算已配置。录音在浏览器里转成 16kHz 单声道 WAV 再上传（最大 2MB），**只发给你配置的识别服务，不会保存在服务器上**。次数用量记在 `data/asr-usage.json`，重启不会清零。可以一口气说几件事，识别后按句号拆开逐句解析，一次最多处理 5 句。
+
 ---
 
 ## 5. 从 Windows 迁移已录入的数据

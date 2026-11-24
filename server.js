@@ -416,12 +416,37 @@ route('DELETE', /^\/api\/locations\/(\d+)$/, (req, res, [id]) => {
 
 // ---------- 快速录入：一句话 → 结构化意图（纯规则，见 lib/parse.js） ----------
 const { parse: parseCommand } = require('./lib/parse');
+// 供「一句话」和「小票」匹配库存用的物品列表（只含未删除的）
+function stockItemsForMatch() {
+  return withPath(db.prepare(`${ITEM_SELECT} WHERE ${LIVE}`).all()).map(i => ({ id: i.id, name: i.name, quantity: i.quantity, unit: i.unit, category: i.category, location_id: i.location_id, location_path: i.location_path }));
+}
 route('POST', /^\/api\/parse$/, async (req, res) => {
   const { text } = await readJson(req);
   if (!String(text || '').trim()) throw new HttpError(400, '请输入一句话');
   if (String(text).length > 200) throw new HttpError(400, '太长了，请一次说一件事');
-  const items = withPath(db.prepare(`${ITEM_SELECT} WHERE ${LIVE}`).all()).map(i => ({ id: i.id, name: i.name, quantity: i.quantity, unit: i.unit, category: i.category, location_id: i.location_id, location_path: i.location_path }));
-  json(res, 200, parseCommand(text, { locations: allLocations(), items }));
+  json(res, 200, parseCommand(text, { locations: allLocations(), items: stockItemsForMatch() }));
+});
+
+// ---------- 拍小票录入：图片 → 识别服务 → 录入意图（见 lib/receipt.js、lib/receipt-service.js） ----------
+const { resolveConfig: resolveReceiptConfig } = require('./lib/receipt');
+const { createReceiptService, ReceiptError } = require('./lib/receipt-service');
+const receipt = createReceiptService({
+  getConfig: () => resolveReceiptConfig(config.receipt, process.env), // 环境变量只在读取时合并，绝不写进 config
+  getStock: stockItemsForMatch,
+  dataDir: DATA_DIR,
+});
+{
+  const c = resolveReceiptConfig(config.receipt, process.env);
+  if (c.problem) console.log(`小票识别配置有问题：${c.problem}`);
+  else if (c.enabled) console.log(`小票识别已启用（模型 ${c.model}）`);
+}
+route('GET', /^\/api\/receipt\/status$/, (req, res) => json(res, 200, receipt.status()));
+route('POST', /^\/api\/receipt\/scan$/, async (req, res) => {
+  if (!receipt.status().enabled) throw new HttpError(503, '识别服务未配置'); // 先于读取请求体
+  const { buf } = await readImage(req, 8);
+  const mime = (req.headers['content-type'] || '').split(';')[0].trim();
+  try { json(res, 200, await receipt.scan(buf, mime)); }
+  catch (e) { if (e instanceof ReceiptError) throw new HttpError(e.status, e.message); throw e; } // 统一错误处理只认 HttpError
 });
 // 按路径创建（或查找）位置："书房 / 书架" → 逐级创建，返回末级位置
 route('POST', /^\/api\/locations\/path$/, async (req, res) => {

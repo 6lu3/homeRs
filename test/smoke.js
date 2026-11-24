@@ -13,6 +13,8 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
 (async () => {
   let r = await call('GET', '/api/items');
   assert(r.status === 401, '未登录访问被拒绝');
+  r = await call('GET', '/api/receipt/status');
+  assert(r.status === 401, '未登录访问小票识别状态被拒绝');
   r = await json('POST', '/api/login', { password: 'wrong' });
   assert(r.status === 401, '错误密码被拒绝');
   r = await json('POST', '/api/login', { password: 'home1234' });
@@ -208,6 +210,11 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
   assert(r.status === 200, '删除空位置');
   const bath = (await call('GET', '/api/locations')).body.find(l => l.path === '卫生间 / 镜柜 / 上层');
   await call('DELETE', `/api/locations/${bath.id}`);
+  // 小票识别（假定服务启动时没有配置识别服务，即没有 RECEIPT_* 环境变量和 receipt 配置）
+  r = await call('GET', '/api/receipt/status');
+  assert(r.status === 200 && r.body.enabled === false, '小票识别：未配置时状态为未启用');
+  r = await call('POST', '/api/receipt/scan', Buffer.from('x'), { 'content-type': 'image/jpeg' });
+  assert(r.status === 503 && String(r.body.error).includes('识别服务未配置'), '小票识别：未配置时扫描返回 503');
   r = await call('POST', '/api/logout');
   r = await call('GET', '/api/items');
   assert(r.status === 401, '退出登录后失效');

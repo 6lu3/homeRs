@@ -9,7 +9,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const KEY = 'sk-secret-123';
 
 // ---------- PROMPT ----------
-check('PROMPT：包含提示词必须有的规则词', ['只返回', '。', '空格', '阿拉伯数字', '酸奶', '逐字'].every(w => PROMPT.includes(w)));
+check('PROMPT：包含提示词必须有的规则词', ['只返回', '。', '空格', '阿拉伯数字', '酸奶', '逐字', '顿号', '牛肉、猪肉'].every(w => PROMPT.includes(w)));
 
 // ---------- resolveConfig ----------
 {
@@ -69,6 +69,7 @@ check('PROMPT：包含提示词必须有的规则词', ['只返回', '。', '空
   check('normalizeTranscript：连续句号合并', n('买了牛奶。。买了鸡蛋') === '买了牛奶。买了鸡蛋');
   check('normalizeTranscript：去掉首尾的句号', n('。买了牛奶。') === '买了牛奶');
   check('normalizeTranscript：逗号不动', n('买了牛奶，放冷藏') === '买了牛奶，放冷藏');
+  check('normalizeTranscript：顿号不动（它不是句子分隔符）', n('买了牛肉、猪肉、排骨') === '买了牛肉、猪肉、排骨');
   check('normalizeTranscript：最长 200 个字符', n('菜'.repeat(250)).length === 200);
   check('normalizeTranscript：空白、空串、非字符串 → 空串', ['', '   ', null, 123, undefined].every(x => n(x) === ''));
   check('normalizeTranscript：字母和数字旁边的空白不动', n('iPhone 15 手机') === 'iPhone 15 手机' && n('买了 iPhone 手机') === '买了 iPhone 手机');

@@ -81,6 +81,18 @@ check('三天前买的面包放吊柜', { action: 'add', name: '面包', loc: '�
 check('感冒药', { action: 'add', name: '感冒药', category: '药品', loc: null });
 check('买了两个娃娃菜放冷藏', { action: 'add', name: '娃娃菜', quantity: 2, unit: '个', loc: '厨房 / 冰箱冷藏', category: '食品' });
 
+// ---------- 没有分隔符的一串物品：按词表自动拆项 ----------
+check('今天买了牛肉猪肉猪肉丝排骨', [{ action: 'add', name: '牛肉' }, { action: 'add', name: '猪肉' }, { action: 'add', name: '猪肉丝' }, { action: 'add', name: '排骨' }]);
+check('买了西红柿鸡蛋青菜', [{ name: '西红柿' }, { name: '鸡蛋' }, { name: '青菜' }]);
+check('买了牛肉猪肉放冷藏', [{ action: 'add', name: '牛肉', loc: '厨房 / 冰箱冷藏' }, { action: 'add', name: '猪肉', loc: '厨房 / 冰箱冷藏' }]);
+check('买了牛肉面', [{ name: '牛肉面' }]);               // 合成词保持一项
+check('买了羊肉面', [{ name: '羊肉面' }]);               // 词表切不完就不拆
+check('买了三鲜水饺', [{ name: '三鲜水饺' }]);
+check('买了牛肉火星肉', [{ name: '牛肉火星肉' }]);       // 一串里有词表没有的词，整串不拆
+check('买了牛肉猪肉两斤', [{ name: '牛肉猪肉', quantity: 2, unit: '斤' }]); // 带数量的段不做词表切分
+check('买了创可贴电钻', [{ action: 'restock', name: '创可贴' }, { action: 'restock', name: '电钻' }]); // 库存里的名字参与切分
+check('买了牛肉、猪肉丝还有排骨', [{ name: '牛肉' }, { name: '猪肉丝' }, { name: '排骨' }]); // 原有分隔符规则不变
+
 // ---------- parseMulti：一口气说多件事 ----------
 function checkM(text, expect, meta = {}) {
   const r = parseMulti(text, ctx);

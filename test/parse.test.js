@@ -76,6 +76,7 @@ check('速冻水饺保质期到2027年3月1日', { action: 'expire', name: '速�
 check('三天前买的面包放吊柜', { action: 'add', name: '面包', loc: '厨房 / 吊柜', expires_at: '' });
 // 兜底
 check('感冒药', { action: 'add', name: '感冒药', category: '药品', loc: null });
+check('买了两个娃娃菜放冷藏', { action: 'add', name: '娃娃菜', quantity: 2, unit: '个', loc: '厨房 / 冰箱冷藏', category: '食品' });
 
 console.log(`\n通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

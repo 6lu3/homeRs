@@ -435,7 +435,8 @@ route('POST', /^\/api\/parse$/, async (req, res) => {
 
 // ---------- 拍小票录入：图片 → 识别服务 → 录入意图（见 lib/receipt.js、lib/receipt-service.js） ----------
 const { resolveConfig: resolveReceiptConfig } = require('./lib/receipt');
-const { createReceiptService, ReceiptError } = require('./lib/receipt-service');
+const { createReceiptService } = require('./lib/receipt-service');
+const { ServiceError } = require('./lib/provider-guard'); // 小票和语音服务的错误都是它的子类
 const receipt = createReceiptService({
   getConfig: () => resolveReceiptConfig(config.receipt, process.env), // 环境变量只在读取时合并，绝不写进 config
   getStock: stockItemsForMatch,
@@ -452,7 +453,32 @@ route('POST', /^\/api\/receipt\/scan$/, async (req, res) => {
   const { buf } = await readImage(req, 8);
   const mime = (req.headers['content-type'] || '').split(';')[0].trim();
   try { json(res, 200, await receipt.scan(buf, mime)); }
-  catch (e) { if (e instanceof ReceiptError) throw new HttpError(e.status, e.message); throw e; } // 统一错误处理只认 HttpError
+  catch (e) { if (e instanceof ServiceError) throw new HttpError(e.status, e.message); throw e; } // 统一错误处理只认 HttpError
+});
+
+// ---------- 语音录入：WAV 录音 → 语音识别服务 → 文字（见 lib/asr.js、lib/asr-service.js；配置与小票完全独立） ----------
+const { resolveConfig: resolveAsrConfig } = require('./lib/asr');
+const { createAsrService } = require('./lib/asr-service');
+const asr = createAsrService({
+  getConfig: () => resolveAsrConfig(config.asr, process.env), // 环境变量只在读取时合并，绝不写进 config
+  dataDir: DATA_DIR,
+});
+{
+  const c = resolveAsrConfig(config.asr, process.env);
+  if (c.problem) console.log(`语音识别配置有问题：${c.problem}`);
+  else if (c.enabled) console.log(`语音识别已启用（模型 ${c.model}）`);
+}
+route('GET', /^\/api\/asr\/status$/, (req, res) => json(res, 200, asr.status()));
+route('POST', /^\/api\/asr\/transcribe$/, async (req, res) => {
+  if (!asr.status().enabled) throw new HttpError(503, '语音识别未配置'); // 先于读取请求体
+  const ct = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (ct !== 'audio/wav' && ct !== 'audio/x-wav') throw new HttpError(415, '仅支持 WAV 录音');
+  let buf;
+  try { buf = await readBody(req, 2 * 1024 * 1024); }
+  catch (e) { if (e instanceof HttpError && e.status === 413) throw new HttpError(413, '录音太长'); throw e; }
+  if (!buf.length) throw new HttpError(400, '录音为空');
+  try { json(res, 200, await asr.transcribe(buf)); }
+  catch (e) { if (e instanceof ServiceError) throw new HttpError(e.status, e.message); throw e; }
 });
 // 按路径创建（或查找）位置："书房 / 书架" → 逐级创建，返回末级位置
 route('POST', /^\/api\/locations\/path$/, async (req, res) => {

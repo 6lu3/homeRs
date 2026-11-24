@@ -15,6 +15,8 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
   assert(r.status === 401, '未登录访问被拒绝');
   r = await call('GET', '/api/receipt/status');
   assert(r.status === 401, '未登录访问小票识别状态被拒绝');
+  r = await call('GET', '/api/asr/status');
+  assert(r.status === 401, '未登录访问语音识别状态被拒绝');
   r = await json('POST', '/api/login', { password: 'wrong' });
   assert(r.status === 401, '错误密码被拒绝');
   r = await json('POST', '/api/login', { password: 'home1234' });
@@ -215,6 +217,14 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
   assert(r.status === 200 && r.body.enabled === false, '小票识别：未配置时状态为未启用');
   r = await call('POST', '/api/receipt/scan', Buffer.from('x'), { 'content-type': 'image/jpeg' });
   assert(r.status === 503 && String(r.body.error).includes('识别服务未配置'), '小票识别：未配置时扫描返回 503');
+  // 语音识别（假定服务启动时没有配置语音识别，即没有 ASR_* 环境变量和 asr 配置）
+  r = await call('GET', '/api/asr/status');
+  assert(r.status === 200 && r.body.enabled === false && r.body.maxSeconds === 30, '语音识别：未配置时状态为未启用');
+  r = await call('POST', '/api/asr/transcribe', Buffer.from('x'), { 'content-type': 'audio/wav' });
+  assert(r.status === 503 && String(r.body.error).includes('语音识别未配置'), '语音识别：未配置时转写返回 503');
+  // 一口气说多件事（用句号隔开）
+  r = await json('POST', '/api/parse', { text: '买了牛奶。买了鸡蛋' });
+  assert(r.status === 200 && r.body.intents.length === 2, '一句话解析：用句号隔开的两件事得到两条意图');
   r = await call('POST', '/api/logout');
   r = await call('GET', '/api/items');
   assert(r.status === 401, '退出登录后失效');

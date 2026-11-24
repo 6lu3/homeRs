@@ -1,5 +1,5 @@
 // 解析器回归测试：node test/parse.test.js
-const { parse, parseMulti } = require('../lib/parse');
+const { parse, parseMulti, splitQuantityGroups } = require('../lib/parse');
 
 // 模拟一棵位置树（与预置数据一致）+ 几件已有物品
 const locs = []; let id = 0;
@@ -92,6 +92,24 @@ check('买了牛肉火星肉', [{ name: '牛肉火星肉' }]);       // 一串�
 check('买了牛肉猪肉两斤', [{ name: '牛肉猪肉', quantity: 2, unit: '斤' }]); // 带数量的段不做词表切分
 check('买了创可贴电钻', [{ action: 'restock', name: '创可贴' }, { action: 'restock', name: '电钻' }]); // 库存里的名字参与切分
 check('买了牛肉、猪肉丝还有排骨', [{ name: '牛肉' }, { name: '猪肉丝' }, { name: '排骨' }]); // 原有分隔符规则不变
+
+// ---------- 「数量 + 单位」成组：每组一项 ----------
+function checkSplit(piece, expected) {
+  const got = splitQuantityGroups(piece);
+  if (JSON.stringify(got) === JSON.stringify(expected)) { pass++; console.log(`✔ [数量成组] ${JSON.stringify(piece)} → ${JSON.stringify(got)}`); }
+  else { fail++; console.log(`✘ [数量成组] ${JSON.stringify(piece)}\n    得到 ${JSON.stringify(got)}，期望 ${JSON.stringify(expected)}`); }
+}
+checkSplit('两斤牛肉三斤排骨', ['两斤牛肉', '三斤排骨']);
+checkSplit('牛肉两斤排骨三斤', ['牛肉两斤', '排骨三斤']);
+checkSplit('一个苹果两个梨', ['一个苹果', '两个梨']);
+checkSplit('两盒酸奶一袋面包', ['两盒酸奶', '一袋面包']);
+checkSplit('半斤牛肉半斤排骨', ['半斤牛肉', '半斤排骨']);
+for (const p of ['两斤牛肉', '两斤牛肉三斤', '两斤牛肉排骨三斤', '5号电池三节', '三鲜水饺两袋', '牛肉猪肉', '']) checkSplit(p, [p]); // 不该拆的原样返回
+check('买了两斤牛肉三斤排骨', [{ name: '牛肉', quantity: 2, unit: '斤' }, { name: '排骨', quantity: 3, unit: '斤' }]);
+check('买了牛肉两斤排骨三斤', [{ name: '牛肉', quantity: 2, unit: '斤' }, { name: '排骨', quantity: 3, unit: '斤' }]);
+check('买了两盒酸奶一袋面包放冷藏', [{ name: '酸奶', quantity: 2, unit: '盒', loc: '厨房 / 冰箱冷藏' }, { name: '面包', quantity: 1, unit: '袋', loc: '厨房 / 冰箱冷藏' }]);
+check('买了一个苹果两个梨', [{ name: '苹果', quantity: 1, unit: '个' }, { name: '梨', quantity: 2, unit: '个' }]);
+check('买了三鲜水饺两袋', [{ name: '三鲜水饺', quantity: 2, unit: '袋' }]); // 不被误切
 
 // ---------- parseMulti：一口气说多件事 ----------
 function checkM(text, expect, meta = {}) {

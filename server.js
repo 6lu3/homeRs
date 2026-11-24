@@ -421,7 +421,7 @@ route('DELETE', /^\/api\/locations\/(\d+)$/, (req, res, [id]) => {
 });
 
 // ---------- 快速录入：一句话 → 结构化意图（纯规则，见 lib/parse.js） ----------
-const { parse: parseCommand } = require('./lib/parse');
+const { parseMulti } = require('./lib/parse');
 // 供「一句话」和「小票」匹配库存用的物品列表（只含未删除的）
 function stockItemsForMatch() {
   return withPath(db.prepare(`${ITEM_SELECT} WHERE ${LIVE}`).all()).map(i => ({ id: i.id, name: i.name, quantity: i.quantity, unit: i.unit, category: i.category, location_id: i.location_id, location_path: i.location_path }));
@@ -430,7 +430,7 @@ route('POST', /^\/api\/parse$/, async (req, res) => {
   const { text } = await readJson(req);
   if (!String(text || '').trim()) throw new HttpError(400, '请输入一句话');
   if (String(text).length > 200) throw new HttpError(400, '太长了，请一次说一件事');
-  json(res, 200, parseCommand(text, { locations: allLocations(), items: stockItemsForMatch() }));
+  json(res, 200, parseMulti(text, { locations: allLocations(), items: stockItemsForMatch() }));
 });
 
 // ---------- 拍小票录入：图片 → 识别服务 → 录入意图（见 lib/receipt.js、lib/receipt-service.js） ----------

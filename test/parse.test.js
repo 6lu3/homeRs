@@ -1,5 +1,5 @@
 // 解析器回归测试：node test/parse.test.js
-const { parse } = require('../lib/parse');
+const { parse, parseMulti } = require('../lib/parse');
 
 // 模拟一棵位置树（与预置数据一致）+ 几件已有物品
 const locs = []; let id = 0;
@@ -22,6 +22,9 @@ const ctx = { locations: locs, items, today };
 let pass = 0, fail = 0;
 function check(text, expect) {
   const r = parse(text, ctx);
+  // 兼容性回归：每个现有句子，parseMulti 的结果必须和 parse 完全一致
+  if (JSON.stringify(parseMulti(text, ctx)) === JSON.stringify(r)) pass++;
+  else { fail++; console.log(`✘ parseMulti 与 parse 的结果不一致：${text}`); }
   const got = r.intents.map(i => ({
     action: i.action, name: i.name, quantity: i.quantity, unit: i.unit, category: i.category, expires_at: i.expires_at,
     loc: i.location ? (i.location.location?.path || (i.location.create ? 'NEW:' + i.location.create.path : 'UNKNOWN')) : null,
@@ -77,6 +80,38 @@ check('三天前买的面包放吊柜', { action: 'add', name: '面包', loc: '�
 // 兜底
 check('感冒药', { action: 'add', name: '感冒药', category: '药品', loc: null });
 check('买了两个娃娃菜放冷藏', { action: 'add', name: '娃娃菜', quantity: 2, unit: '个', loc: '厨房 / 冰箱冷藏', category: '食品' });
+
+// ---------- parseMulti：一口气说多件事 ----------
+function checkM(text, expect, meta = {}) {
+  const r = parseMulti(text, ctx);
+  const got = r.intents.map(i => ({
+    action: i.action, name: i.name, quantity: i.quantity, unit: i.unit,
+    loc: i.location ? (i.location.location?.path || (i.location.create ? 'NEW:' + i.location.create.path : 'UNKNOWN')) : null,
+  }));
+  const problems = [];
+  if (got.length !== expect.length) problems.push(`意图数 ${got.length} ≠ ${expect.length}`);
+  expect.forEach((e, idx) => { const g = got[idx] || {}; for (const k of Object.keys(e)) if (JSON.stringify(g[k]) !== JSON.stringify(e[k])) problems.push(`[${idx}].${k}: 得到 ${JSON.stringify(g[k])}，期望 ${JSON.stringify(e[k])}`); });
+  if ('confidence' in meta && r.confidence !== meta.confidence) problems.push(`confidence: 得到 ${r.confidence}，期望 ${meta.confidence}`);
+  if ('truncated' in meta && (r.truncated === true) !== meta.truncated) problems.push(`truncated: 得到 ${r.truncated}，期望 ${meta.truncated}`);
+  if (meta.truncated === false && 'truncated' in r) problems.push('没有被截断时不应该出现 truncated 键');
+  if ('text' in meta && r.text !== meta.text) problems.push(`text: 得到 ${JSON.stringify(r.text)}`);
+  if (problems.length) { fail++; console.log(`✘ [多句] ${text}\n    ${problems.join('\n    ')}\n    实际：${JSON.stringify(got)}`); }
+  else { pass++; console.log(`✔ [多句] ${JSON.stringify(text)}  →  ${got.map(g => `${g.action} ${g.name}`).join(' ; ') || '（无）'} [${r.confidence}]${r.truncated ? ' 截断' : ''}`); }
+}
+checkM('把鸡蛋放入冰箱冷藏。买了五花肉一盒', [{ action: 'add', name: '鸡蛋', loc: '厨房 / 冰箱冷藏' }, { action: 'add', name: '五花肉', quantity: 1, unit: '盒' }], { text: '把鸡蛋放入冰箱冷藏。买了五花肉一盒' });
+checkM('买了两盒酸奶放冷藏；创可贴用完了', [{ action: 'add', name: '酸奶', quantity: 2, unit: '盒', loc: '厨房 / 冰箱冷藏' }, { action: 'deplete', name: '创可贴' }]);
+checkM('买了牛奶\n买了鸡蛋', [{ name: '牛奶' }, { name: '鸡蛋' }]);
+checkM('买了牛奶!买了鸡蛋', [{ name: '牛奶' }, { name: '鸡蛋' }]);
+checkM('买了牛奶?买了鸡蛋', [{ name: '牛奶' }, { name: '鸡蛋' }]);
+checkM('买了牛奶;买了鸡蛋', [{ name: '牛奶' }, { name: '鸡蛋' }]);
+checkM('买了牛奶。。 。买了鸡蛋。', [{ name: '牛奶' }, { name: '鸡蛋' }]);
+checkM('买了苹果。买了梨。买了桃。买了李。买了杏。买了枣。买了瓜', ['苹果', '梨', '桃', '李', '杏'].map(name => ({ name })), { truncated: true });
+checkM('买了苹果。买了梨。买了桃。买了李。买了杏', ['苹果', '梨', '桃', '李', '杏'].map(name => ({ name })), { truncated: false });
+checkM('买了牛奶。买了鸡蛋', [{ name: '牛奶' }, { name: '鸡蛋' }], { confidence: 'high' });
+checkM('买了牛奶。哈哈', [{ name: '牛奶' }, { name: '哈哈' }], { confidence: 'low' });
+checkM('买了牛奶。嗯', [{ name: '牛奶' }], { confidence: 'low' });
+checkM('嗯', [], { confidence: 'none' });
+checkM('。。', [], { confidence: 'none' });
 
 console.log(`\n通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

@@ -145,6 +145,57 @@ sudo hostnamectl set-hostname home
 
 之后 iPhone / Mac / Windows 可直接访问 `http://home.local:3000`（部分 Android 浏览器不支持 `.local`，仍需用 IP）。
 
+### 小票识别（可选）
+
+物品页的相机按钮需要一个能读图的多模态模型。**没配置就不显示相机按钮，其他功能不受影响。**
+
+**推荐写在数据目录的 `data/config.json` 里**（在原有的 `passwordHash`、`secret` 旁边加一个 `receipt` 对象），并限制权限：
+
+```json
+{
+  "passwordHash": "…保持原样…",
+  "secret": "…保持原样…",
+  "receipt": {
+    "url": "https://api.deepseek.com/chat/completions",
+    "key": "你的 key",
+    "model": "模型名",
+    "format": "openai",
+    "extra": {},
+    "timeoutSec": 60,
+    "dailyLimit": 30
+  }
+}
+```
+
+```bash
+chmod 600 data/config.json
+sudo systemctl restart home-inventory   # 改完配置要重启；启动日志会提示「小票识别已启用」或配置问题
+```
+
+不要把 key 写进 systemd 单元文件：它通常所有用户都能读。也可以改用环境变量，环境变量优先于配置文件，逐项覆盖：
+
+| 环境变量 | 对应字段 | 说明 |
+|---|---|---|
+| `RECEIPT_API_URL` | `url` | 完整接口地址，写到最后的路径 |
+| `RECEIPT_API_KEY` | `key` | 识别服务的 key。只存在于服务器，任何接口都不会返回它 |
+| `RECEIPT_MODEL` | `model` | 能读图的模型名 |
+| `RECEIPT_FORMAT` | `format` | `openai`（默认）、`anthropic` 或 `responses` |
+| `RECEIPT_EXTRA` | `extra` | JSON 对象，合并进请求体最外层；用环境变量时整体替换文件里的 `extra`；不是合法 JSON 对象会视为未配置 |
+| `RECEIPT_TIMEOUT_S` | `timeoutSec` | 超时秒数，默认 60 |
+| `RECEIPT_DAILY_LIMIT` | `dailyLimit` | 每天最多识别几次，默认 30，`0` 表示不限（防止误操作烧钱） |
+
+`url`、`key`、`model` 三项齐全才算已配置。三种 `format` 的地址写法：
+
+| `format` | 适用 | 地址示例 |
+|---|---|---|
+| `openai` | OpenAI 兼容接口（DeepSeek 官方、多数中转站和国内模型） | `https://…/chat/completions` |
+| `anthropic` | Anthropic 格式 | `https://…/v1/messages` |
+| `responses` | 火山方舟的 Responses 接口 | `https://ark.cn-beijing.volces.com/api/v3/responses` |
+
+**`extra` 的用法**：有的模型默认开着「深度思考」，会慢很多、花很多 token。方舟的模型可以关：`{"thinking":{"type":"disabled"}}`。需要限制输出长度也写在这里，参数名因服务商而异：`max_tokens`、`max_completion_tokens` 或 `max_output_tokens`。程序本身不设输出上限，主要靠每日次数上限控制花费。
+
+**隐私与花费**：拍的小票图会发给你配置的识别服务，不会保存在服务器上。次数用量记在 `data/receipt-usage.json`，全家共用一个计数，重启不会清零。建议给这个功能单独申请一个 key，余额放少一点。
+
 ---
 
 ## 5. 从 Windows 迁移已录入的数据

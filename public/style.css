@@ -187,6 +187,10 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .quick { display: flex; gap: 8px; padding: 12px 14px 0; }
 .quick input { margin: 0; border-radius: var(--radius-badge); padding: 9px 16px; background: var(--card); font-size: 14px; }
 .quick .btn { flex: none; padding: 9px 16px; border-radius: var(--radius-badge); white-space: nowrap; font-size: 14px; }
+.quick #receipt-btn { display: inline-flex; align-items: center; justify-content: center; padding: 9px 12px; }
+.quick #receipt-btn .ico { width: 18px; height: 18px; }
+.quick #receipt-btn:disabled { opacity: .5; cursor: wait; }
+#cf-list > .cf-notice { display: flex; align-items: center; gap: 5px; margin: 0 0 10px; color: var(--warn); font-size: 13px; line-height: 1.4; }
 .quick-hint { margin: 6px 16px 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .cf-item { margin-bottom: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field-bg); transition: all .2s ease; }
 .cf-item:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(72, 56, 40, .06); }

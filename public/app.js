@@ -89,7 +89,7 @@
     return true;
   }
   const ACTION_TEXT = { create: '新增', update: '修改', quantity: '数量', move: '移到', delete: '删除', restore: '恢复', purge: '彻底删除' };
-  const SOURCE_TEXT = { quick: '一句话', import: '导入', list: '购物清单' };
+  const SOURCE_TEXT = { quick: '一句话', receipt: '小票', import: '导入', list: '购物清单' };
   function fmtTime(iso) {
     const d = new Date(iso); const diff = (Date.now() - d) / 60000;
     if (diff < 1) return '刚刚'; if (diff < 60) return `${Math.floor(diff)} 分钟前`; if (diff < 1440) return `${Math.floor(diff / 60)} 小时前`;
@@ -118,6 +118,7 @@
     $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
     await Promise.all([loadLocations(), loadCategories()]);
     await Promise.all([loadItems(), loadStats()]);
+    loadReceiptStatus();
   }
 
   // ---------- 加载数据 ----------
@@ -280,6 +281,7 @@
   // ---------- 快速录入（一句话 → 确认 → 执行） ----------
   const ACTION_LABEL = { add: ['新增', ''], restock: ['补货 +', ''], move: ['移动位置', 'info'], consume: ['减少 −', 'minus'], deplete: ['用完 → 删除', 'zero'], set_quantity: ['设为数量', 'info'], expire: ['设置到期', 'info'] };
   let cfIntents = [];
+  let cfSource = 'quick'; // 本次确认卡的来源：quick（一句话）或 receipt（小票），写库存时带在 ?source= 里
   $('#quick-form').addEventListener('submit', async e => {
     e.preventDefault();
     const text = $('#quick-text').value.trim(); if (!text) return;
@@ -291,6 +293,34 @@
     } catch (err) { toast(err.message, 3000); }
     finally { btn.disabled = false; }
   });
+  // ---------- 拍小票录入 ----------
+  async function loadReceiptStatus() {
+    let on = false;
+    try { on = !!(await api('/api/receipt/status')).enabled; } catch {}
+    $('#receipt-btn').classList.toggle('hidden', !on);
+    $('#receipt-hint').classList.toggle('hidden', !on);
+  }
+  $('#receipt-btn').addEventListener('click', () => $('#receipt-file').click());
+  $('#receipt-file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = ''; // 允许再次选同一张
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast('请选择图片'); return; }
+    const btn = $('#receipt-btn'); btn.disabled = true;
+    toast('识别中，请稍等…', 120000);
+    try {
+      const blob = await compressImage(file, 1800, 0.85);
+      const r = await api('/api/receipt/scan', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+      $('#toast').classList.add('hidden');
+      if (!r.intents.length) { toast('没识别出商品，换张更清晰的图试试', 3000); return; }
+      showConfirm({
+        text: r.text, intents: r.intents, source: 'receipt',
+        notice: r.duplicate ? '这张小票好像已经录入过了，请确认不是重复。' : '',
+        note: '按小票识别，请核对数量和单位；位置和到期日小票上没有，请自己选。',
+      });
+    } catch (err) { toast(err.message, 4000); }
+    finally { btn.disabled = false; }
+  });
   function locationOptions(sel, create) {
     let html = '<option value="">（不设置位置）</option>';
     if (create) html += `<option value="new:${esc(create.path)}" ${sel === 'new' ? 'selected' : ''}>新建：${esc(create.path)}</option>`;
@@ -299,8 +329,9 @@
   }
   function showConfirm(r) {
     cfIntents = r.intents;
+    cfSource = r.source || 'quick';
     $('#cf-text').textContent = `「${r.text}」`;
-    $('#cf-list').innerHTML = r.intents.map((it, i) => {
+    $('#cf-list').innerHTML = (r.notice ? `<p class="cf-notice">${ICO('alert')} ${esc(r.notice)}</p>` : '') + r.intents.map((it, i) => {
       const [label, cls] = ACTION_LABEL[it.action] || ['', ''];
       const qtyLabel = it.action === 'restock' ? '增加数量' : it.action === 'consume' ? '减少数量' : '数量';
       const showQty = ['add', 'restock', 'consume', 'set_quantity'].includes(it.action);
@@ -323,7 +354,7 @@
         </div>
       </div>`;
     }).join('');
-    $('#cf-note').innerHTML = r.confidence === 'low' ? `${ICO('alert')} 这句话我不太确定，请核对后再确认。` : '核对无误后点「确认」，可直接修改任何一项。';
+    $('#cf-note').innerHTML = r.note ? esc(r.note) : r.confidence === 'low' ? `${ICO('alert')} 这句话我不太确定，请核对后再确认。` : '核对无误后点「确认」，可直接修改任何一项。';
     $('#confirm').classList.remove('hidden');
   }
   function hideConfirm() { $('#confirm').classList.add('hidden'); }
@@ -344,23 +375,23 @@
         const ex = it.existing;
         if (it.action === 'add') {
           const name = v('name').trim(); if (!name) continue;
-          await postJson('/api/items?source=quick', { name, quantity: qty, unit: v('unit'), category: v('category'), location_id, expires_at: v('expires_at') });
+          await postJson(`/api/items?source=${cfSource}`, { name, quantity: qty, unit: v('unit'), category: v('category'), location_id, expires_at: v('expires_at') });
           done.push(`新增 ${name}`);
         } else if (it.action === 'restock') {
           const patch = { quantity: (ex.quantity || 0) + qty }; if (v('unit')) patch.unit = v('unit'); if (v('expires_at')) patch.expires_at = v('expires_at');
-          await postJson(`/api/items/${ex.id}?source=quick`, patch, 'PUT'); done.push(`${ex.name} +${qty}`);
+          await postJson(`/api/items/${ex.id}?source=${cfSource}`, patch, 'PUT'); done.push(`${ex.name} +${qty}`);
         } else if (it.action === 'move') {
           const patch = { location_id }; if (v('expires_at')) patch.expires_at = v('expires_at');
-          await postJson(`/api/items/${ex.id}?source=quick`, patch, 'PUT'); done.push(`移动 ${ex.name}`);
+          await postJson(`/api/items/${ex.id}?source=${cfSource}`, patch, 'PUT'); done.push(`移动 ${ex.name}`);
         } else if (it.action === 'consume') {
-          const r = await postJson(`/api/items/${ex.id}?source=quick`, { quantity: Math.max(0, (ex.quantity || 0) - qty) }, 'PUT'); done.push(r.auto_deleted ? `${ex.name} 用完，已移入回收站` : `${ex.name} −${qty}`);
+          const r = await postJson(`/api/items/${ex.id}?source=${cfSource}`, { quantity: Math.max(0, (ex.quantity || 0) - qty) }, 'PUT'); done.push(r.auto_deleted ? `${ex.name} 用完，已移入回收站` : `${ex.name} −${qty}`);
         } else if (it.action === 'deplete') {
-          await postJson(`/api/items/${ex.id}?source=quick`, { quantity: 0 }, 'PUT'); done.push(`${ex.name} 用完，已移入回收站`);
+          await postJson(`/api/items/${ex.id}?source=${cfSource}`, { quantity: 0 }, 'PUT'); done.push(`${ex.name} 用完，已移入回收站`);
         } else if (it.action === 'set_quantity') {
           const patch = { quantity: qty }; if (v('unit')) patch.unit = v('unit');
-          const r = await postJson(`/api/items/${ex.id}?source=quick`, patch, 'PUT'); done.push(r.auto_deleted ? `${ex.name} 用完，已移入回收站` : `${ex.name} = ${qty}`);
+          const r = await postJson(`/api/items/${ex.id}?source=${cfSource}`, patch, 'PUT'); done.push(r.auto_deleted ? `${ex.name} 用完，已移入回收站` : `${ex.name} = ${qty}`);
         } else if (it.action === 'expire') {
-          await postJson(`/api/items/${ex.id}?source=quick`, { expires_at: v('expires_at') }, 'PUT'); done.push(`${ex.name} 到期日已更新`);
+          await postJson(`/api/items/${ex.id}?source=${cfSource}`, { expires_at: v('expires_at') }, 'PUT'); done.push(`${ex.name} 到期日已更新`);
         }
       }
       hideConfirm(); $('#quick-text').value = '';

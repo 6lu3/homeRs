@@ -588,15 +588,28 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 
 .menu-nav .btn { flex: none; }
 .menu-cur { margin-left: 6px; background: var(--primary-soft); color: var(--primary-dark); }
-.menu-week { display: grid; gap: 10px; }
-.menu-day { padding: 10px 12px; border: 1px solid transparent; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); }
-.menu-day.today { border-color: var(--primary); background: var(--primary-soft); }
-.menu-day-h { margin-bottom: 4px; font-size: 14px; font-weight: 600; }
-.menu-meal { display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 8px 4px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.menu-meal:hover { background: var(--field-bg); }
-.menu-meal-k { flex: none; width: 1.5em; color: var(--muted); font-size: 13px; }
-.menu-meal-v { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.menu-meal-v.empty { color: var(--muted); }
+/* 日历式周视图（HTML 由 public/menu-cal.js 生成）。默认是手机一屏压缩版，≥720px 见文件末尾的宽屏规则 */
+.mc { display: grid; grid-template-columns: 24px repeat(7, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--line); box-shadow: var(--shadow-card); }
+.mc > * { background: var(--card); }
+.mc-corner, .mc-head, .mc-rl { background: var(--field-bg); }
+.mc-head { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 7px 0 6px; border-top: 3px solid var(--accent); }
+.mc-cn { font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", serif; font-size: 12px; font-weight: 500; line-height: 1.2; }
+.mc-dt { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.mc-l { display: none; }
+.mc-head.today { background: color-mix(in srgb, var(--accent) 12%, var(--field-bg)); }
+.mc-head.today .mc-cn { color: var(--accent); }
+.mc-head.today .mc-dt .mc-s { padding: 0 5px; border-radius: 99px; background: var(--accent); color: #fff; }
+.mc-rl { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 11px; font-weight: 500; }
+.mc-cell.today { background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+.mc-entry { display: block; width: 100%; height: 100%; min-height: 84px; padding: 5px 2px; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.mc-entry:hover { background: var(--field-bg); }
+.mc-dish { display: -webkit-box; margin-bottom: 3px; overflow: hidden; font-size: 11px; line-height: 1.3; word-break: break-all; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.mc-dish:nth-child(n+4) { display: none; }
+.mc-more { display: block; color: var(--accent); font-size: 10px; }
+.mc-plus { display: block; padding-top: 22px; color: var(--muted); font-size: 14px; text-align: center; opacity: .4; }
+@media (max-width: 719px) {
+  #menu-body.pad { padding-right: 6px; padding-left: 6px; }
+}
 .dish-block { margin-bottom: 12px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field-bg); }
 .dish-head { display: flex; gap: 8px; margin-bottom: 8px; }
 .dish-head .dish-name { flex: 1; min-width: 0; font-weight: 600; }
@@ -617,5 +630,17 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .pc-meta { margin-top: 4px; color: var(--muted); font-size: 13px; }
 #pc-ok:disabled { opacity: .5; cursor: not-allowed; }
 @media (min-width: 720px) {
-  .menu-week { grid-template-columns: 1fr 1fr; }
+  #view-menu > #menu-body, #view-menu > .menu-nav { max-width: 1120px; }
+  .mc { grid-template-columns: 74px repeat(7, minmax(0, 1fr)); }
+  .mc-s { display: none; }
+  .mc-l { display: inline; }
+  .mc-head { padding: 16px 8px 13px; }
+  .mc-cn { font-size: 17px; letter-spacing: .08em; }
+  .mc-dt { font-size: 12px; }
+  .mc-head.today::after { content: "今天"; position: absolute; top: 6px; right: 6px; padding: 1px 6px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 9px; }
+  .mc-rl { font-size: 12px; letter-spacing: .16em; }
+  .mc-entry { min-height: 96px; padding: 13px 14px 15px; }
+  .mc-dish, .mc-dish:nth-child(n+4) { display: block; margin-bottom: 5px; font-size: 14.5px; line-height: 1.55; }
+  .mc-more { display: none; }
+  .mc-plus { padding-top: 24px; font-size: 16px; }
 }

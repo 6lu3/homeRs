@@ -408,14 +408,7 @@
     if (!w) return;
     const today = todayStr();
     $('#menu-range').innerHTML = `${mdLabel(w.start)} – ${mdLabel(w.end)}${w.start === mondayOf(today) ? ' <span class="badge menu-cur">本周</span>' : ''}`;
-    $('#menu-body').innerHTML = `<div class="menu-week">${w.days.map(day => `
-      <div class="menu-day${day.date === today ? ' today' : ''}">
-        <div class="menu-day-h">${WEEKDAYS[parseLocalDate(day.date).getDay()]} ${mdLabel(day.date)}${day.date === today ? ' <span class="badge menu-cur">今天</span>' : ''}</div>
-        ${['breakfast', 'lunch', 'dinner'].map(m => {
-          const names = (day.meals[m] || []).map(d => esc(d.name)).join('、');
-          return `<button type="button" class="menu-meal" data-date="${esc(day.date)}" data-meal="${m}"><span class="menu-meal-k">${MEAL_NAMES[m]}</span><span class="menu-meal-v${names ? '' : ' empty'}">${names || '点击添加'}</span></button>`;
-        }).join('')}
-      </div>`).join('')}</div>`;
+    $('#menu-body').innerHTML = MenuCal.render(w, today);
   }
   let menuSeq = 0;
   async function loadMenuWeek(start) {
@@ -432,7 +425,7 @@
   $('#menu-next').addEventListener('click', () => loadMenuWeek(addDaysStr(menuState.start || mondayOf(todayStr()), 7)));
   $('#menu-today').addEventListener('click', () => loadMenuWeek(mondayOf(todayStr())));
   $('#menu-body').addEventListener('click', e => {
-    const b = e.target.closest('.menu-meal');
+    const b = e.target.closest('.mc-entry');
     if (b) openMealEditor(b.dataset.date, b.dataset.meal);
   });
 

@@ -47,6 +47,8 @@ check('PROMPT：包含提示词必须有的规则词', ['JSON', '购物袋', '�
   r = buildRequest({ ...base, format: 'anthropic' }, 'QUJD', 'image/png');
   const ac = r.body.messages[0].content;
   check('buildRequest：anthropic 头和请求体', r.headers['x-api-key'] === 'sk-x' && r.headers['anthropic-version'] === '2023-06-01' && !r.headers.authorization && r.body.max_tokens === 2000 && same(ac[0], { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'QUJD' } }) && ac[1].type === 'text');
+  r = buildRequest({ ...base, format: 'anthropic', extra: { max_tokens: 4000 } }, 'QUJD', 'image/png');
+  check('buildRequest：anthropic 的 max_tokens 默认 2000，但 extra 里设置的优先', r.body.max_tokens === 4000);
   r = buildRequest({ ...base, format: 'responses' }, 'QUJD', 'image/webp');
   const rc = r.body.input[0].content;
   check('buildRequest：responses 请求体（input_image/input_text，无 messages）', same(rc[0], { type: 'input_image', image_url: 'data:image/webp;base64,QUJD' }) && rc[1].type === 'input_text' && r.body.messages === undefined && r.headers.authorization === 'Bearer sk-x');
@@ -85,7 +87,8 @@ check('PROMPT：包含提示词必须有的规则词', ['JSON', '购物袋', '�
 // ---------- cleanName ----------
 {
   const cases = [['大娃娃菜 500g', '大娃娃菜'], ['青虾仁 300g/盒', '青虾仁'], ['牛奶 250ml*12', '牛奶'], ['牛奶 250ml×12', '牛奶'], ['可乐 1.5L', '可乐'],
-    ['苹果 2斤', '苹果'], ['陈克明圆挂面800g', '陈克明圆挂面'], ['大米 5KG', '大米'], ['NB 内酯豆腐 350g', 'NB 内酯豆腐'], ['500g', '500g']];
+    ['苹果 2斤', '苹果'], ['陈克明圆挂面800g', '陈克明圆挂面'], ['大米 5KG', '大米'], ['NB 内酯豆腐 350g', 'NB 内酯豆腐'], ['500g', '500g'],
+    ['可乐 330ml*24罐', '可乐'], ['64GB U盘', '64GB U盘'], ['5G 路由器', '5G 路由器'], ['8GB内存条', '8GB内存条']];
   for (const [a, b] of cases) check(`cleanName：「${a}」→「${b}」`, cleanName(a) === b);
 }
 
@@ -96,7 +99,7 @@ check('PROMPT：包含提示词必须有的规则词', ['JSON', '购物袋', '�
     { id: 2, name: '酸奶', quantity: 6, unit: '瓶', category: '食品', location_id: null, location_path: '' },
   ];
   let r = buildIntents([{ name: 'NB 内酯豆腐 350g', quantity: 1, unit: '盒' }], stock);
-  check('buildIntents：品牌前缀+规格仍匹配库存 → 补货', r.length === 1 && r[0].action === 'restock' && r[0].existing.id === 1 && r[0].quantity === 1 && r[0].unit === '盒' && !r[0].warning);
+  check('buildIntents：品牌前缀+规格仍匹配库存 → 补货，并提示小票上的原文', r.length === 1 && r[0].action === 'restock' && r[0].existing.id === 1 && r[0].quantity === 1 && r[0].unit === '盒' && r[0].warning === '小票上是「NB 内酯豆腐」，请确认是同一件物品');
   r = buildIntents([{ name: '大娃娃菜 500g', quantity: 1, unit: '份' }], stock);
   check('buildIntents：没匹配到 → 新增，去规格并猜分类', r[0].action === 'add' && r[0].name === '大娃娃菜' && r[0].unit === '份' && r[0].category === '食品' && !r[0].existing);
   r = buildIntents([{ name: 'NB 混合纯坚果 盐焗味 400g', quantity: 1, unit: '罐' }], stock);
@@ -108,7 +111,14 @@ check('PROMPT：包含提示词必须有的规则词', ['JSON', '购物袋', '�
   r = buildIntents([{ name: '酸奶', quantity: 2, unit: '盒' }], [{ ...stock[1], unit: '' }]);
   check('buildIntents：库存单位为空 → 用小票单位，无警告', r[0].unit === '盒' && !r[0].warning);
   r = buildIntents([{ name: '豆腐', quantity: 1, unit: '盒' }, { name: '内酯豆腐 350g', quantity: 2, unit: '盒' }], stock);
-  check('buildIntents：多行命中同一件物品且单位相同 → 合并', r.length === 1 && r[0].action === 'restock' && r[0].quantity === 3);
+  check('buildIntents：多行命中同一件物品且单位相同 → 合并，并列出与库存名不同的小票原文', r.length === 1 && r[0].action === 'restock' && r[0].quantity === 3 && r[0].warning === '小票上是「内酯豆腐」，请确认是同一件物品');
+  const eggs = [{ id: 3, name: '鸡蛋', quantity: 10, unit: '个', category: '食品', location_id: null, location_path: '' }];
+  r = buildIntents([{ name: '鸡蛋面', quantity: 1, unit: '包' }], eggs);
+  check('buildIntents：子串误匹配（鸡蛋面 ≈ 鸡蛋）时，警告里写出小票原文', r[0].action === 'restock' && r[0].warning.includes('「鸡蛋面」') && r[0].warning.includes('单位'));
+  r = buildIntents([{ name: '酸奶饮品', quantity: 1, unit: '盒' }], stock);
+  check('buildIntents：名称警告和单位警告同时出现，用「；」连接', r[0].warning === '小票上是「酸奶饮品」，请确认是同一件物品；小票单位「盒」和库存单位「瓶」不同，请核对数量');
+  r = buildIntents([{ name: '豆腐', quantity: 1, unit: '盒' }, { name: '豆腐干', quantity: 1, unit: '盒' }], stock);
+  check('buildIntents：不同名称合并时只列出与库存名不同的那些', r.length === 1 && r[0].quantity === 2 && r[0].warning === '小票上是「豆腐干」，请确认是同一件物品');
   r = buildIntents([{ name: '豆腐', quantity: 1, unit: '盒' }, { name: '豆腐', quantity: 1, unit: '袋' }], stock);
   check('buildIntents：单位冲突 → 第二条改为新增并警告', r.length === 2 && r[0].action === 'restock' && r[0].quantity === 1 && r[0].unit === '盒' && r[1].action === 'add' && r[1].name === '豆腐' && r[1].unit === '袋' && r[1].warning === '和已有「豆腐」单位不同，已作为新物品');
   r = buildIntents([{ name: '青菜', quantity: 1, unit: '份' }, { name: '青菜', quantity: 2, unit: '份' }], stock);

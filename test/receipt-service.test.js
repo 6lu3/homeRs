@@ -191,6 +191,42 @@ const leaks = (m, extra = []) => [KEY, ...extra].some(s => m.logs.join('\n').inc
     check('重复：最近的仍然记得', (await m2.svc.scan(IMG, 'image/jpeg')).duplicate === true);
   }
 
+  // ---------- 响应体读取：边读边限 2 MB ----------
+  {
+    const stream = (chunks, size = 1024 * 1024) => {
+      const state = { pulled: 0, cancelled: false };
+      const body = new ReadableStream({
+        pull(c) { if (state.pulled >= chunks) { c.close(); return; } state.pulled++; c.enqueue(new Uint8Array(size).fill(120)); },
+        cancel() { state.cancelled = true; },
+      });
+      return { state, body };
+    };
+    const noText = async () => { throw new Error('不应该调用 text()'); };
+    let s = stream(20);
+    let m = mk({ fetchImpl: async () => ({ ok: true, status: 200, headers: new Headers(), body: s.body, text: noText }) });
+    check('读取：超过 2 MB 立即中止（不会把整个响应读进内存）并取消流', isErr(await fails(m.svc.scan(IMG, 'image/jpeg')), 502, UNREADABLE) && s.state.pulled <= 4 && s.state.cancelled);
+    s = stream(20);
+    m = mk({ fetchImpl: async () => ({ ok: true, status: 200, headers: new Headers({ 'content-length': '3000000' }), body: s.body, text: noText }) });
+    check('读取：content-length 超过 2 MB 时不读响应体，直接取消', isErr(await fails(m.svc.scan(IMG, 'image/jpeg')), 502, UNREADABLE) && s.state.pulled <= 1 && s.state.cancelled);
+    s = stream(3);
+    m = mk({ fetchImpl: async () => ({ ok: false, status: 500, headers: new Headers(), body: s.body, text: noText }) });
+    check('读取：HTTP 出错时丢弃响应体（不留着占连接）', isErr(await fails(m.svc.scan(IMG, 'image/jpeg')), 502, '识别服务出错（HTTP 500），请稍后再试') && s.state.cancelled);
+    const payload = Buffer.from(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ store: '测试店', items: [{ name: '大娃娃菜', quantity: 1, unit: '份' }] }) } }] }));
+    const parts = []; for (let i = 0; i < payload.length; i += 7) parts.push(new Uint8Array(payload.subarray(i, i + 7)));
+    const body = new ReadableStream({ start(c) { for (const p of parts) c.enqueue(p); c.close(); } });
+    m = mk({ fetchImpl: async () => ({ ok: true, status: 200, headers: new Headers(), body, text: noText }) });
+    const r = await m.svc.scan(IMG, 'image/jpeg');
+    check('读取：中文被切在多个小块里也能正确拼回并解析', r.count === 1 && r.text === '小票识别：测试店，共 1 件');
+  }
+
+  // ---------- 超时秒数不是整数毫秒时不能让每次识别都失败 ----------
+  {
+    for (const sec of [1.1, 1e7]) {
+      const m = mk({ cfg: baseCfg({ timeoutSec: sec }) });
+      check(`超时：timeoutSec=${sec} 时识别正常`, (await fails(m.svc.scan(IMG, 'image/jpeg'))) === null);
+    }
+  }
+
   console.log(`\n通过 ${pass}，失败 ${fail}`);
   } finally { clearInterval(keepAlive); }
   process.exit(fail ? 1 : 0);

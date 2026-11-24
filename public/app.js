@@ -261,13 +261,13 @@
   async function refreshAll() { await Promise.all([loadCategories(), loadStats()]); await loadItems(); }
 
   // 手机拍照通常几 MB，上传前在浏览器里压缩到最长边 1280
-  function compressImage(file, max = 1280, quality = 0.82) {
+  function compressImage(file, max = 1280, quality = 0.82, scaleFn = null) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const scale = scaleFn ? scaleFn(img.width, img.height) : Math.min(1, max / Math.max(img.width, img.height));
         const c = document.createElement('canvas');
         c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
         c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
@@ -309,14 +309,14 @@
     const btn = $('#receipt-btn'); btn.disabled = true;
     toast('识别中，请稍等…', 120000);
     try {
-      const blob = await compressImage(file, 1800, 0.85);
+      const blob = await compressImage(file, 1800, 0.85, ImgScale.scaleFor); // 长截图按像素预算缩，避免字看不清
       const r = await api('/api/receipt/scan', { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
       $('#toast').classList.add('hidden');
       if (!r.intents.length) { toast('没识别出商品，换张更清晰的图试试', 3000); return; }
       showConfirm({
         text: r.text, intents: r.intents, source: 'receipt',
         notice: r.duplicate ? '这张小票好像已经录入过了，请确认不是重复。' : '',
-        note: '按小票识别，请核对数量和单位；位置和到期日小票上没有，请自己选。',
+        note: '按小票识别，请核对数量和单位。不想录入的行：新增的清空名称，补货的把数量改成 0。位置和到期日小票上没有，请自己选。',
       });
     } catch (err) { toast(err.message, 4000); }
     finally { btn.disabled = false; }

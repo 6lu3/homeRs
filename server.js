@@ -38,7 +38,13 @@ function verifyPassword(pw, stored) {
 }
 let config;
 if (fs.existsSync(CONFIG_FILE)) {
-  config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  // 下面正则里是一个看不见的 BOM 字符（U+FEFF），用来兼容 Windows 记事本保存的带 BOM 的文件
+  try { config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8').replace(/^﻿/, '')); }
+  catch {
+    // 不要把 JSON.parse 的原始报错打出来：它会带上附近的原文，可能是 secret 或识别服务的 key
+    console.error(`${CONFIG_FILE} 不是合法的 JSON，请检查括号、逗号和引号（要用英文半角的 "）。`);
+    process.exit(1);
+  }
 } else {
   const initial = process.env.INVENTORY_PASSWORD || 'home1234';
   config = { passwordHash: hashPassword(initial), secret: crypto.randomBytes(32).toString('hex') };

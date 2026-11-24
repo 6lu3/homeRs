@@ -125,7 +125,7 @@ sudo systemctl enable --now home-inventory
 
 ## 4. 可调配置
 
-全部在 `/etc/systemd/system/home-inventory.service` 的 `Environment=` 行里，改完 `sudo systemctl daemon-reload && sudo systemctl restart home-inventory`：
+全部在 `/etc/systemd/system/home-inventory.service` 的 `Environment=` 行里，改完 `sudo systemctl daemon-reload && sudo systemctl restart home-inventory`（**小票识别的 key 例外，不要写在这里**，见本节末尾「小票识别」）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -172,7 +172,16 @@ chmod 600 data/config.json
 sudo systemctl restart home-inventory   # 改完配置要重启；启动日志会提示「小票识别已启用」或配置问题
 ```
 
-不要把 key 写进 systemd 单元文件：它通常所有用户都能读。也可以改用环境变量，环境变量优先于配置文件，逐项覆盖：
+不要把 key 直接写进 systemd 单元文件的 `Environment=`：单元文件和 `systemctl show` 通常所有用户都能读。想用环境变量的话，放进一个只有 root 能读的环境变量文件：
+
+```bash
+sudo install -m 600 -o root -g root /dev/null /etc/home-inventory.env
+sudoedit /etc/home-inventory.env        # 每行一项，如 RECEIPT_API_KEY=你的key
+# 再在单元文件的 [Service] 段加一行：EnvironmentFile=-/etc/home-inventory.env
+sudo systemctl daemon-reload && sudo systemctl restart home-inventory
+```
+
+环境变量优先于配置文件，逐项覆盖：
 
 | 环境变量 | 对应字段 | 说明 |
 |---|---|---|

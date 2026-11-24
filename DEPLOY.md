@@ -239,7 +239,7 @@ sudo systemctl daemon-reload && sudo systemctl restart home-inventory
 | `ASR_DAILY_LIMIT` | `dailyLimit` | 每天最多识别几次，默认 100，`0` 表示不限 |
 | `ASR_MAX_SECONDS` | `maxSeconds` | 单段录音最长几秒，默认 30，最大 60。识别服务如果拒绝较长的录音，调小它即可 |
 
-`url`、`key`、`model` 三项齐全才算已配置。录音在浏览器里转成 16kHz 单声道 WAV 再上传（最大 2MB），**只发给你配置的识别服务，不会保存在服务器上**。次数用量记在 `data/asr-usage.json`，重启不会清零。可以一口气说几件事，识别后按句号拆开逐句解析，一次最多处理 5 句。
+`url`、`key`、`model` 三项齐全才算已配置。录音在浏览器里转成 16kHz 单声道 WAV 再上传（最大 2MB），**只发给你配置的识别服务，不会保存在服务器上**。次数用量记在 `data/asr-usage.json`，重启不会清零。可以一口气说几件事，识别后按句号拆开逐句解析，一次最多处理 5 句；识别出的文字最长 200 字，**把 `maxSeconds` 调到 40 秒以上时要注意**：说得太长的话会在句子边界被截断，确认卡上会提示「这段话太长，后面的没有录入」。
 
 ---
 

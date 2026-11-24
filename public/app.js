@@ -284,13 +284,14 @@
   let cfIntents = [];
   let cfSource = 'quick'; // 本次确认卡的来源：quick（一句话）或 receipt（小票），写库存时带在 ?source= 里
   // 一句话录入的解析流程：输入框提交和语音识别共用
-  async function runQuick(text) {
+  async function runQuick(text, notice = '') {
     text = String(text || '').trim(); if (!text) return;
     const btn = $('#quick-form button[type=submit]'); btn.disabled = true;
     try {
       const r = await postJson('/api/parse', { text });
       if (!r.intents.length) { toast('没听懂，换个说法试试，或直接点右下角添加按钮'); return; }
       if (r.truncated) r.notice = '只处理了前 5 句，后面的没有录入，请分开说。';
+      else if (notice) r.notice = notice;
       showConfirm(r);
     } catch (err) { toast(err.message, 3000); }
     finally { btn.disabled = false; }
@@ -326,7 +327,8 @@
   });
   // ---------- 语音录入 ----------
   // state：idle（空闲）/ starting（等待麦克风权限）/ recording（录音中）/ busy（识别中）
-  const asr = { maxSeconds: 30, state: 'idle', stream: null, rec: null, chunks: [], timer: null, tick: null, started: 0 };
+  // gen：每次放弃（切换页面、退出登录）加 1，等权限期间用户已经离开时，权限一到就丢掉，不再录音
+  const asr = { maxSeconds: 30, state: 'idle', gen: 0, stream: null, rec: null, timer: null, tick: null, started: 0 };
   async function loadAsrStatus() {
     let on = false;
     try {
@@ -349,32 +351,45 @@
   function asrCleanup() { // 释放麦克风、清掉计时器和提示，保证不留残留状态
     clearTimeout(asr.timer); clearInterval(asr.tick); asr.timer = asr.tick = null;
     if (asr.stream) { asr.stream.getTracks().forEach(t => t.stop()); asr.stream = null; }
-    asr.rec = null; asr.chunks = [];
+    asr.rec = null;
     $('#asr-btn .asr-sec').textContent = '';
   }
   function asrStop() { if (asr.rec && asr.rec.state === 'recording') asr.rec.stop(); }
   function asrAbort() { // 切换页面等情况：放弃这次录音
+    if (asr.state === 'starting') { asr.gen++; return; } // 还在等麦克风权限：权限一到就丢掉
     if (asr.state !== 'recording') return;
+    asr.gen++;
     if (asr.rec) { asr.rec.onstop = null; try { asr.rec.stop(); } catch {} }
     asrCleanup(); asrUi('idle');
   }
+  function micErrorText(e) {
+    const n = e && e.name;
+    if (n === 'NotAllowedError' || n === 'SecurityError') return '没有麦克风权限，请在浏览器设置里允许';
+    if (n === 'NotFoundError' || n === 'OverconstrainedError') return '没有找到麦克风';
+    if (n === 'NotReadableError' || n === 'AbortError') return '麦克风正被别的程序占用，请稍后再试';
+    return '无法使用麦克风';
+  }
   async function asrStart() {
+    const gen = asr.gen;
     let stream;
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-    catch { toast('没有麦克风权限，请在浏览器设置里允许', 4000); return; }
+    catch (e) { if (gen === asr.gen) toast(micErrorText(e), 4000); return; }
+    if (gen !== asr.gen) { stream.getTracks().forEach(t => t.stop()); return; } // 等权限期间用户已经离开
     let rec;
     try { rec = new MediaRecorder(stream); }
     catch { stream.getTracks().forEach(t => t.stop()); toast('这个浏览器暂时不支持语音录入', 4000); return; }
-    asr.stream = stream; asr.rec = rec; asr.chunks = [];
-    rec.ondataavailable = e => { if (e.data && e.data.size) asr.chunks.push(e.data); };
-    rec.onstop = () => asrFinish(rec.mimeType);
-    rec.start();
+    const chunks = []; // 每次录音自己的数组，旧录音迟到的数据不会混进下一次
+    asr.stream = stream; asr.rec = rec;
+    rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = () => asrFinish(rec.mimeType, chunks);
+    try { rec.start(); }
+    catch { asrCleanup(); toast('这个浏览器暂时不支持语音录入', 4000); return; }
     asr.started = Date.now();
     asrUi('recording');
     asr.tick = setInterval(() => { $('#asr-btn .asr-sec').textContent = Math.floor((Date.now() - asr.started) / 1000) + 's'; }, 250);
     asr.timer = setTimeout(asrStop, asr.maxSeconds * 1000);
   }
-  // 录音 → 解码 → 各声道平均成单声道 → 16kHz 16 位 WAV
+  // 录音 → 解码 → 各声道平均成单声道 → 16kHz 16 位 WAV（最多 maxSeconds 秒，保证不超过服务器的请求体上限）
   async function asrToWav(blob) {
     const AC = window.AudioContext || window.webkitAudioContext;
     const ctx = new AC();
@@ -384,13 +399,13 @@
       catch { throw new Error('这个浏览器暂时不支持语音录入'); }
       const mono = new Float32Array(buf.length);
       for (let c = 0; c < buf.numberOfChannels; c++) { const d = buf.getChannelData(c); for (let i = 0; i < d.length; i++) mono[i] += d[i] / buf.numberOfChannels; }
-      return new Blob([WavEnc.encode(mono, buf.sampleRate)], { type: 'audio/wav' });
-    } finally { try { ctx.close(); } catch {} }
+      return new Blob([WavEnc.encode(mono, buf.sampleRate, asr.maxSeconds)], { type: 'audio/wav' });
+    } finally { Promise.resolve().then(() => ctx.close()).catch(() => {}); }
   }
-  async function asrFinish(mime) {
-    const chunks = asr.chunks, secs = (Date.now() - asr.started) / 1000;
+  async function asrFinish(mime, chunks) {
+    const secs = (Date.now() - asr.started) / 1000;
     asrCleanup(); asrUi('busy');
-    toast('识别中，请稍等…', 60000);
+    toast('识别中，请稍等…', 120000);
     try {
       const blob = new Blob(chunks, { type: mime || 'audio/webm' });
       if (!blob.size || secs < 0.5) { toast('没听清，再说一遍试试'); return; }
@@ -399,7 +414,7 @@
       const text = String(r.text || '').trim().slice(0, 200);
       if (!text) { toast('没听清，再说一遍试试'); return; }
       $('#quick-text').value = text; // 替换输入框里原有的内容，然后和点「录入」一样解析并弹出确认卡
-      await runQuick(text);
+      await runQuick(text, r.truncated ? '这段话太长，后面的没有录入，请分开说。' : '');
     } catch (err) { toast(err.message, 4000); }
     finally { asrUi('idle'); }
   }

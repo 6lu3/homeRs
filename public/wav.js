@@ -26,7 +26,9 @@
     return out;
   }
 
-  function encode(samples, sampleRate) {
+  // maxSeconds（可选）：超过的部分截掉，保证上传的 WAV 不会超过服务器的请求体上限
+  function encode(samples, sampleRate, maxSeconds) {
+    if (maxSeconds > 0 && samples.length > Math.floor(maxSeconds * sampleRate)) samples = samples.subarray(0, Math.floor(maxSeconds * sampleRate));
     const pcm = resample(samples, sampleRate);
     const dataLen = pcm.length * 2;
     const out = new Uint8Array(44 + dataLen);

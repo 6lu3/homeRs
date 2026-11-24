@@ -48,5 +48,15 @@ const sine = (rate, seconds, freq = 440) => Float32Array.from({ length: Math.rou
   check('空输入：只有 44 字节头，数据长度 0，总长度−8 为 36', e.length === 44 && de.getUint32(40, true) === 0 && de.getUint32(4, true) === 36);
 }
 
+// 最长秒数：超过的部分被截掉，保证上传不会超过请求体上限
+{
+  const w = encode(new Float32Array(160000).fill(0.1), 16000, 5);
+  check('maxSeconds：10 秒的输入截成 5 秒（数据长度 160000）', view(w).getUint32(40, true) === 160000 && w.length === 44 + 160000);
+  const w2 = encode(new Float32Array(48000 * 3).fill(0.1), 48000, 1.5);
+  check('maxSeconds：按输入采样率换算，48kHz 的 3 秒截成 1.5 秒（约 24000 个 16kHz 采样）', Math.abs(view(w2).getUint32(40, true) / 2 - 24000) <= 2);
+  check('maxSeconds：没超过时不截', view(encode(new Float32Array(16000).fill(0.1), 16000, 5)).getUint32(40, true) === 32000);
+  check('maxSeconds：不传时不截', view(encode(new Float32Array(160000).fill(0.1), 16000)).getUint32(40, true) === 320000);
+}
+
 console.log(`\n通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

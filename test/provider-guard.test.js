@@ -120,6 +120,19 @@ const leaks = (logs, extra = []) => [KEY, ...extra].some(s => logs.join('\n').in
       check('ErrorClass：抛出的是传入的类', e instanceof MyErr && e instanceof ServiceError && e.status === 502);
     }
 
+    // ---------- 日志里带上是哪个服务 ----------
+    {
+      const a = run(async () => textReply('', 500), { label: '语音识别' }); await fails(a.p);
+      check('label：日志写明是哪个服务（语音识别）', a.logs.join('\n').includes('语音识别：返回 HTTP 500'));
+      const b = run(async () => textReply('', 500)); await fails(b.p);
+      check('label：不传时默认「识别服务」', b.logs.join('\n').includes('识别服务：返回 HTTP 500'));
+      const c = run(async () => { throw new TypeError('fetch failed'); }, { label: '小票识别' }); await fails(c.p);
+      check('label：连不上时同样带上', c.logs.join('\n').includes('小票识别：连不上'));
+      const logs = [];
+      createUsage({ file: path.join(tmp(), 'no', 'dir', 'x.json'), today: () => '2026-11-24', log: (...x) => logs.push(x.join(' ')), label: '语音识别' }).tryConsume(2);
+      check('label：用量文件写入失败的日志也带上', logs.join('\n').includes('语音识别：用量文件写入失败'));
+    }
+
     console.log(`\n通过 ${pass}，失败 ${fail}`);
   } finally { clearInterval(keepAlive); }
   process.exit(fail ? 1 : 0);

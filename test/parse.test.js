@@ -85,7 +85,7 @@ check('买了两个娃娃菜放冷藏', { action: 'add', name: '娃娃菜', quan
 function checkM(text, expect, meta = {}) {
   const r = parseMulti(text, ctx);
   const got = r.intents.map(i => ({
-    action: i.action, name: i.name, quantity: i.quantity, unit: i.unit,
+    action: i.action, name: i.name, quantity: i.quantity, unit: i.unit, expires_at: i.expires_at,
     loc: i.location ? (i.location.location?.path || (i.location.create ? 'NEW:' + i.location.create.path : 'UNKNOWN')) : null,
   }));
   const problems = [];
@@ -112,6 +112,11 @@ checkM('买了牛奶。哈哈', [{ name: '牛奶' }, { name: '哈哈' }], { conf
 checkM('买了牛奶。嗯', [{ name: '牛奶' }], { confidence: 'low' });
 checkM('嗯', [], { confidence: 'none' });
 checkM('。。', [], { confidence: 'none' });
+// 说完话停顿一下再说保质期：到期日要补给上一句，不能丢
+checkM('买了两盒酸奶放冷藏。保质期到12月1日', [{ action: 'add', name: '酸奶', quantity: 2, unit: '盒', loc: '厨房 / 冰箱冷藏', expires_at: '2026-12-01' }], { confidence: 'high' });
+checkM('买了面包放吊柜。三天后过期', [{ action: 'add', name: '面包', loc: '厨房 / 吊柜', expires_at: '2026-11-15' }], { confidence: 'high' });
+checkM('买了牛奶。买了面包。保质期到12月1日', [{ name: '牛奶', expires_at: '' }, { name: '面包', expires_at: '2026-12-01' }], { confidence: 'high' });
+checkM('保质期到12月1日。买了牛奶', [{ name: '牛奶', expires_at: '' }], { confidence: 'low' }); // 前面没有可补的意图，照旧算没听懂的一句
 
 console.log(`\n通过 ${pass}，失败 ${fail}`);
 process.exit(fail ? 1 : 0);

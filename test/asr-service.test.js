@@ -62,6 +62,13 @@ const leaks = (m, extra = []) => [KEY, ...extra].some(s => m.logs.join('\n').inc
 
     // ---------- 空文字与无法理解 ----------
     {
+      const long = Array.from({ length: 25 }, () => '买了苹果一盒放冷藏').join('。');
+      const cutRes = await mk({ fetchImpl: async () => said(long) }).svc.transcribe(WAV);
+      check('过长：返回截到句末的文字，并带 truncated:true', cutRes.truncated === true && cutRes.text.length <= 200 && cutRes.text.endsWith('放冷藏'));
+      const okRes = await mk({ fetchImpl: async () => said('买了牛奶') }).svc.transcribe(WAV);
+      check('没超长时返回里没有 truncated 键', JSON.stringify(okRes) === '{"text":"买了牛奶"}');
+    }
+    {
       const run = async fetchImpl => fails(mk({ fetchImpl }).svc.transcribe(WAV));
       const empty = await mk({ fetchImpl: async () => said('') }).svc.transcribe(WAV);
       check('空文字：返回 200 的 {text:""}，不是错误', JSON.stringify(empty) === '{"text":""}');

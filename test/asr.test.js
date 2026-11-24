@@ -1,5 +1,5 @@
 // 语音识别纯逻辑回归测试：node test/asr.test.js
-const { PROMPT, resolveConfig, buildRequest, extractReplyText, normalizeTranscript } = require('../lib/asr');
+const { PROMPT, resolveConfig, buildRequest, extractReplyText, normalizeTranscript, normalizeTranscriptEx } = require('../lib/asr');
 
 let pass = 0, fail = 0;
 function check(name, cond) {
@@ -71,6 +71,19 @@ check('PROMPT：包含提示词必须有的规则词', ['只返回', '。', '空
   check('normalizeTranscript：逗号不动', n('买了牛奶，放冷藏') === '买了牛奶，放冷藏');
   check('normalizeTranscript：最长 200 个字符', n('菜'.repeat(250)).length === 200);
   check('normalizeTranscript：空白、空串、非字符串 → 空串', ['', '   ', null, 123, undefined].every(x => n(x) === ''));
+  check('normalizeTranscript：字母和数字旁边的空白不动', n('iPhone 15 手机') === 'iPhone 15 手机' && n('买了 iPhone 手机') === '买了 iPhone 手机');
+  check('normalizeTranscript：去掉整句外面的一对引号', n('“买了两盒酸奶放冷藏”') === '买了两盒酸奶放冷藏' && n('「买了牛奶」') === '买了牛奶' && n('"买了牛奶"') === '买了牛奶');
+  check('normalizeTranscript：去掉「识别结果：」之类的前缀（和引号）', n('识别结果：买了牛奶') === '买了牛奶' && n('转写：买了牛奶') === '买了牛奶' && n('识别结果：“买了牛奶”') === '买了牛奶');
+  check('normalizeTranscript：句子中间的引号不动', n('买了“牛奶”') === '买了“牛奶”');
+  // 太长时按句子截断，并告诉调用方被截断了
+  const sentence = '买了苹果一盒放冷藏';
+  const long = Array.from({ length: 25 }, () => sentence).join('。'); // 249 个字符
+  let r = normalizeTranscriptEx(long);
+  check('normalizeTranscriptEx：超长时退回到最后一个句号，不留半句话，且标记被截断', r.cut === true && r.text.length <= 200 && r.text.split('。').length === 20 && r.text.endsWith('放冷藏'));
+  r = normalizeTranscriptEx('菜'.repeat(250));
+  check('normalizeTranscriptEx：没有句号可退时硬截断到 200，并标记被截断', r.cut === true && r.text.length === 200);
+  r = normalizeTranscriptEx('买了牛奶。买了鸡蛋');
+  check('normalizeTranscriptEx：没超长时 cut 为 false', r.cut === false && r.text === '买了牛奶。买了鸡蛋');
 }
 
 console.log(`\n通过 ${pass}，失败 ${fail}`);

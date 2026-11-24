@@ -111,6 +111,22 @@ check('买了两盒酸奶一袋面包放冷藏', [{ name: '酸奶', quantity: 2,
 check('买了一个苹果两个梨', [{ name: '苹果', quantity: 1, unit: '个' }, { name: '梨', quantity: 2, unit: '个' }]);
 check('买了三鲜水饺两袋', [{ name: '三鲜水饺', quantity: 2, unit: '袋' }]); // 不被误切
 
+// ---------- 终审后补的用例 ----------
+// 「口味/馅料 + 产品」这类整体名称不能被拆开（词表里有的合成词，或以单字词结尾的整串不拆）
+for (const w of ['花生米', '葡萄酒', '苹果醋', '柠檬茶', '姜茶', '红糖姜茶', '牛奶糖', '草莓酸奶', '猪肉白菜水饺', '猪肉包子', '红豆面包', '玉米淀粉', '牛肉饺子']) check(`买了${w}`, [{ name: w }]);
+// 说话时常带的开头和结尾，不能让拆项失效
+check('买了点牛肉猪肉', [{ name: '牛肉' }, { name: '猪肉' }]);
+check('买了一些牛肉猪肉', [{ name: '牛肉' }, { name: '猪肉' }]);
+check('昨天买的牛肉猪肉放冷藏', [{ action: 'add', name: '牛肉', loc: '厨房 / 冰箱冷藏' }, { action: 'add', name: '猪肉', loc: '厨房 / 冰箱冷藏' }]);
+check('我买了牛肉猪肉了', [{ name: '牛肉' }, { name: '猪肉' }]);
+// 数量单位后面紧跟「米」「年」不是在说长度或年份（一袋米、五斤米、两箱年糕）
+check('买了一袋米', [{ name: '米', quantity: 1, unit: '袋' }]);
+check('买了五斤米两桶油', [{ name: '米', quantity: 5, unit: '斤' }, { name: '油', quantity: 2, unit: '桶' }]);
+check('买了两箱年糕', [{ name: '年糕', quantity: 2, unit: '箱' }]);
+check('买了三个月的牛奶', [{ name: '三个月的牛奶', quantity: 1, unit: '' }]); // 「三个月」是时长，不是 3 个：原有行为必须保持不变
+// 库存名里有空白，句子里没有
+check('买了5号电池创可贴', [{ action: 'restock', name: '5号电池' }, { action: 'restock', name: '创可贴' }]);
+
 // ---------- parseMulti：一口气说多件事 ----------
 function checkM(text, expect, meta = {}) {
   const r = parseMulti(text, ctx);

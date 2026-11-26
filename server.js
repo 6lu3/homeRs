@@ -157,6 +157,35 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_menu_ing_item ON menu_ingredients(item_id);
 `);
 
+// 学习计划：大计划 → 学习项（起止日期）→ 每天的勾选（级联删除）
+db.exec(`
+  CREATE TABLE IF NOT EXISTS study_plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    sort INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS study_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_id INTEGER NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    sort INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS study_checks (
+    item_id INTEGER NOT NULL REFERENCES study_items(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    PRIMARY KEY (item_id, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_study_items_plan ON study_items(plan_id);
+  CREATE INDEX IF NOT EXISTS idx_study_items_dates ON study_items(start_date, end_date);
+  CREATE INDEX IF NOT EXISTS idx_study_checks_date ON study_checks(date);
+`);
+
 // 首次运行：预置常见位置，方便直接上手
 if (db.prepare('SELECT COUNT(*) AS n FROM locations').get().n === 0) {
   const ins = db.prepare('INSERT INTO locations(name, parent_id, sort) VALUES (?, ?, ?)');
@@ -853,6 +882,129 @@ function purgeOldMenus() {
 }
 purgeOldMenus();
 setInterval(purgeOldMenus, 6 * 3600e3).unref();
+
+// ---------- 学习计划（纯逻辑见 lib/study.js；长期记录，不自动清理） ----------
+const study = require('./lib/study');
+const { localDate } = require('./lib/provider-guard');
+function studyDate(s) {
+  if (!study.isDate(s)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD');
+  return s;
+}
+// 名称 + 起止日期的通用校验（大计划和学习项共用）
+function studyFields(b) {
+  b = b || {};
+  const name = String(b.name ?? '').trim();
+  if (!name) throw new HttpError(400, '名称不能为空');
+  const start_date = studyDate(b.start_date), end_date = studyDate(b.end_date);
+  if (end_date < start_date) throw new HttpError(400, '结束日期不能早于开始日期');
+  return { name, start_date, end_date };
+}
+function studyItemFields(b) {
+  const f = studyFields(b);
+  const plan_id = Number(b.plan_id);
+  if (!Number.isInteger(plan_id) || !db.prepare('SELECT 1 FROM study_plans WHERE id = ?').get(plan_id)) throw new HttpError(400, '大计划不存在');
+  return { ...f, plan_id, note: String(b.note ?? '').trim() };
+}
+const studyPlanRow = id => db.prepare('SELECT id, name, start_date, end_date FROM study_plans WHERE id = ?').get(id);
+const studyItemRow = id => db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items WHERE id = ?').get(id);
+function checkedByItem(ids) {
+  const map = new Map(ids.map(id => [id, []]));
+  if (!ids.length) return map;
+  for (const c of db.prepare(`SELECT item_id, date FROM study_checks WHERE item_id IN (${ids.map(() => '?').join(',')}) ORDER BY date`).all(...ids)) map.get(c.item_id).push(c.date);
+  return map;
+}
+
+route('GET', /^\/api\/study\/plans$/, (req, res) => {
+  json(res, 200, db.prepare(`SELECT p.id, p.name, p.start_date, p.end_date, (SELECT COUNT(*) FROM study_items i WHERE i.plan_id = p.id) AS item_count FROM study_plans p ORDER BY p.start_date, p.id`).all());
+});
+route('POST', /^\/api\/study\/plans$/, async (req, res) => {
+  const f = studyFields(await readJson(req));
+  const id = db.prepare('INSERT INTO study_plans(name, start_date, end_date, created_at) VALUES(?, ?, ?, ?)').run(f.name, f.start_date, f.end_date, new Date().toISOString()).lastInsertRowid;
+  json(res, 200, studyPlanRow(id));
+});
+route('PUT', /^\/api\/study\/plans\/(\d+)$/, async (req, res, [id]) => {
+  const f = studyFields(await readJson(req));
+  if (!studyPlanRow(id)) throw new HttpError(404, '大计划不存在');
+  db.prepare('UPDATE study_plans SET name = ?, start_date = ?, end_date = ? WHERE id = ?').run(f.name, f.start_date, f.end_date, id);
+  json(res, 200, studyPlanRow(id));
+});
+route('DELETE', /^\/api\/study\/plans\/(\d+)$/, (req, res, [id]) => {
+  if (!studyPlanRow(id)) throw new HttpError(404, '大计划不存在');
+  const removed = db.prepare('SELECT COUNT(*) AS n FROM study_items WHERE plan_id = ?').get(id).n;
+  db.prepare('DELETE FROM study_plans WHERE id = ?').run(id);  // 外键级联删除学习项和勾选
+  json(res, 200, { removed });
+});
+
+route('GET', /^\/api\/study\/items$/, (req, res, _m, url) => {
+  const plan = url.searchParams.get('plan');
+  const rows = plan ? db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items WHERE plan_id = ? ORDER BY start_date, id').all(Number(plan))
+    : db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items ORDER BY start_date, id').all();
+  const checked = checkedByItem(rows.map(r => r.id));
+  json(res, 200, rows.map(r => ({ ...r, checked: checked.get(r.id) })));
+});
+route('POST', /^\/api\/study\/items$/, async (req, res) => {
+  const f = studyItemFields(await readJson(req));
+  const id = db.prepare('INSERT INTO study_items(plan_id, name, start_date, end_date, note) VALUES(?, ?, ?, ?, ?)').run(f.plan_id, f.name, f.start_date, f.end_date, f.note).lastInsertRowid;
+  json(res, 200, studyItemRow(id));
+});
+route('PUT', /^\/api\/study\/items\/(\d+)$/, async (req, res, [id]) => {
+  const f = studyItemFields(await readJson(req));
+  if (!studyItemRow(id)) throw new HttpError(404, '学习项不存在');
+  db.prepare('UPDATE study_items SET plan_id = ?, name = ?, start_date = ?, end_date = ?, note = ? WHERE id = ?').run(f.plan_id, f.name, f.start_date, f.end_date, f.note, id);
+  json(res, 200, studyItemRow(id));  // 不动勾选：范围外的旧勾选保留，只是不计入进度
+});
+route('DELETE', /^\/api\/study\/items\/(\d+)$/, (req, res, [id]) => {
+  if (!studyItemRow(id)) throw new HttpError(404, '学习项不存在');
+  db.prepare('DELETE FROM study_items WHERE id = ?').run(id);
+  json(res, 200, { ok: true });
+});
+
+// 某一天要学的 + 即将开始的
+route('GET', /^\/api\/study\/day$/, (req, res, _m, url) => {
+  const date = studyDate(url.searchParams.get('date'));
+  const today = localDate();
+  const rows = db.prepare('SELECT i.id, i.plan_id, p.name AS plan_name, i.name, i.note, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id ORDER BY i.end_date, i.id').all();
+  const today_items = study.itemsOnDate(rows, date);
+  const later = study.upcoming(rows, date, 3);
+  const checked = checkedByItem(today_items.map(r => r.id));
+  json(res, 200, {
+    date,
+    items: today_items.map(r => {
+      const dates = checked.get(r.id);
+      return { ...r, checked: dates.includes(date), ...study.progress(r, dates, date, today) };
+    }),
+    upcoming: later.map(({ id, plan_id, plan_name, name, start_date, end_date }) => ({ id, plan_id, plan_name, name, start_date, end_date })),
+  });
+});
+// 某个月里每个学习项占哪几天、哪几天已勾选
+route('GET', /^\/api\/study\/month$/, (req, res, _m, url) => {
+  const month = url.searchParams.get('month') || '';
+  let layout;
+  const rows = db.prepare('SELECT i.id, i.plan_id, p.name AS plan_name, i.name, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id ORDER BY i.start_date, i.id').all();
+  try { layout = study.monthLayout(rows, month); } catch (e) { throw new HttpError(400, e.message); }
+  const [y, mo] = month.split('-').map(Number);
+  const byId = new Map(rows.map(r => [r.id, r]));
+  const checked = checkedByItem(layout.map(l => l.id));
+  json(res, 200, {
+    month,
+    daysInMonth: new Date(Date.UTC(y, mo, 0)).getUTCDate(),
+    items: layout.map(l => ({
+      ...byId.get(l.id), days: l.days,
+      checked: checked.get(l.id).filter(d => d.startsWith(month + '-')).map(d => Number(d.slice(8))).filter(d => l.days.includes(d)),
+    })),
+  });
+});
+route('PUT', /^\/api\/study\/check$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const item = studyItemRow(Number(b.item_id));
+  if (!item) throw new HttpError(404, '学习项不存在');
+  const date = studyDate(b.date);
+  if (date < item.start_date || date > item.end_date) throw new HttpError(400, '这一天不在该学习项的日期范围内');
+  const checked = b.checked === true;
+  if (checked) db.prepare('INSERT OR IGNORE INTO study_checks(item_id, date) VALUES(?, ?)').run(item.id, date);
+  else db.prepare('DELETE FROM study_checks WHERE item_id = ? AND date = ?').run(item.id, date);
+  json(res, 200, { item_id: item.id, date, checked });
+});
 
 // 买回来了：数量补到最低库存（或指定数量）
 route('POST', /^\/api\/items\/(\d+)\/bought$/, async (req, res, [id]) => {

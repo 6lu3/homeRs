@@ -206,6 +206,101 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     for (const [d, m] of [[W, 'lunch'], [W2, 'dinner']]) await json('PUT', '/api/menu/meal', { date: d, meal: m, dishes: [] });
   }
 
+  // 学习计划（用远期日期，避免撞到真实数据）
+  {
+    const P = { name: '冒烟学习计划', start_date: '2031-01-01', end_date: '2031-06-30' };
+    r = await json('POST', '/api/study/plans', { ...P, name: '  ' });
+    assert(r.status === 400 && r.body.error === '名称不能为空', '学习计划：空名称被拒绝');
+    r = await json('POST', '/api/study/plans', { ...P, end_date: '2030-12-31' });
+    assert(r.status === 400 && r.body.error === '结束日期不能早于开始日期', '学习计划：结束早于开始被拒绝');
+    r = await json('POST', '/api/study/plans', { ...P, start_date: '2031-02-30' });
+    assert(r.status === 400 && r.body.error === '日期格式应为 YYYY-MM-DD', '学习计划：非法日期被拒绝');
+    r = await json('POST', '/api/study/plans', P);
+    assert(r.status === 200 && r.body.id > 0, '学习计划：新建大计划');
+    const plan = r.body;
+    r = await json('POST', '/api/study/plans', { ...P, name: '冒烟学习计划乙' });
+    const plan2 = r.body;
+
+    const I = { plan_id: plan.id, name: 'Python 基础', start_date: '2031-03-01', end_date: '2031-03-10', note: '第一章起' };
+    r = await json('POST', '/api/study/items', { ...I, plan_id: 999999 });
+    assert(r.status === 400 && r.body.error === '大计划不存在', '学习计划：学习项的大计划不存在被拒绝');
+    r = await json('POST', '/api/study/items', { ...I, name: '' });
+    assert(r.status === 400, '学习计划：学习项空名称被拒绝');
+    r = await json('POST', '/api/study/items', I);
+    assert(r.status === 200 && r.body.id > 0, '学习计划：新建学习项');
+    const it = r.body;
+    r = await json('POST', '/api/study/items', { ...I, name: '超出范围的项', start_date: '2032-01-01', end_date: '2032-01-05' });
+    assert(r.status === 200, '学习计划：学习项日期可超出大计划范围');
+    const itOut = r.body;
+    r = await json('POST', '/api/study/items', { ...I, plan_id: plan2.id, name: '乙的项' });
+    const itB = r.body;
+    r = await json('POST', '/api/study/items', { ...I, name: '后面的项', start_date: '2031-03-20', end_date: '2031-03-25' });
+    const itLater = r.body;
+
+    // 某天要学什么
+    r = await call('GET', '/api/study/day?date=2031-03-03');
+    const mine = r.body.items.find(x => x.id === it.id);
+    assert(r.status === 200 && mine && mine.dayIndex === 3 && mine.total === 10 && mine.checked === false && mine.done === 0, '学习计划：当天列出覆盖它的项，第 3 天 / 共 10 天');
+    assert(mine.plan_name === '冒烟学习计划' && mine.note === '第一章起', '学习计划：当天返回大计划名和备注');
+    assert(!r.body.items.some(x => x.id === itLater.id), '学习计划：范围外的项不在当天列表');
+    assert(r.body.upcoming.some(x => x.id === itLater.id), '学习计划：开始日在后的项出现在即将开始');
+    r = await call('GET', '/api/study/day');
+    assert(r.status === 400, '学习计划：缺 date 被拒绝');
+    r = await call('GET', '/api/study/day?date=2031-02-30');
+    assert(r.status === 400, '学习计划：非法 date 被拒绝');
+
+    // 勾选
+    r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: true });
+    assert(r.status === 200 && r.body.checked === true, '学习计划：范围内勾选成功');
+    await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: true });
+    r = await call('GET', '/api/study/day?date=2031-03-03');
+    let m = r.body.items.find(x => x.id === it.id);
+    assert(m.checked === true && m.done === 1, '学习计划：重复勾选不产生重复记录');
+    r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-11', checked: true });
+    assert(r.status === 400 && r.body.error === '这一天不在该学习项的日期范围内', '学习计划：范围外勾选被拒绝');
+    r = await call('GET', '/api/study/day?date=2031-03-03');
+    assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：被拒绝的勾选没有写入');
+    r = await json('PUT', '/api/study/check', { item_id: 999999, date: '2031-03-03', checked: true });
+    assert(r.status === 404, '学习计划：勾选不存在的项返回 404');
+    r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-04', checked: false });
+    assert(r.status === 200, '学习计划：取消没勾过的日期不报错');
+
+    // 改日期不丢勾选
+    r = await json('PUT', `/api/study/items/${it.id}`, { ...I, start_date: '2031-03-05', end_date: '2031-03-10' });
+    assert(r.status === 200, '学习计划：修改学习项日期');
+    r = await call('GET', '/api/study/day?date=2031-03-05');
+    assert(r.body.items.find(x => x.id === it.id).done === 0, '学习计划：勾选被挤出范围后不计入进度');
+    r = await json('PUT', `/api/study/items/${it.id}`, I);
+    r = await call('GET', '/api/study/day?date=2031-03-05');
+    assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：日期改回后原有勾选恢复计入');
+
+    // 列表与按月
+    r = await call('GET', `/api/study/items?plan=${plan.id}`);
+    const li = r.body.find(x => x.id === it.id);
+    assert(r.status === 200 && li && li.checked.includes('2031-03-03') && !r.body.some(x => x.id === itB.id), '学习计划：按大计划列出学习项及已勾选日期');
+    r = await call('GET', '/api/study/plans');
+    assert(r.body.find(x => x.id === plan.id).item_count === 3, '学习计划：大计划列表带项数');
+    r = await call('GET', '/api/study/month?month=2031-03');
+    const mi = r.body.items.find(x => x.id === it.id);
+    assert(r.status === 200 && r.body.daysInMonth === 31 && mi && mi.days.length === 10 && mi.days[0] === 1 && JSON.stringify(mi.checked) === '[3]', '学习计划：按月返回占的日号和已勾选日号');
+    assert(!r.body.items.some(x => x.id === itOut.id), '学习计划：按月不含与该月无交集的项');
+    r = await call('GET', '/api/study/month?month=2031-13');
+    assert(r.status === 400, '学习计划：非法月份被拒绝');
+
+    // 删除
+    r = await call('DELETE', `/api/study/items/${itLater.id}`);
+    assert(r.status === 200, '学习计划：删除学习项');
+    r = await call('DELETE', `/api/study/plans/${plan.id}`);
+    assert(r.status === 200 && r.body.removed === 2, '学习计划：删除大计划返回连带删除的项数');
+    r = await call('GET', '/api/study/items');
+    assert(!r.body.some(x => x.id === it.id || x.id === itOut.id) && r.body.some(x => x.id === itB.id), '学习计划：删除大计划连带删除其项，不影响别的计划');
+    r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: true });
+    assert(r.status === 404, '学习计划：已删除的项不能再勾选');
+    r = await call('DELETE', `/api/study/plans/${plan2.id}`);
+    r = await call('DELETE', `/api/study/plans/${plan2.id}`);
+    assert(r.status === 404, '学习计划：删除不存在的大计划返回 404');
+  }
+
   // 清理（只删本测试创建的数据）
   for (const i of (await call('GET', '/api/items')).body) if (['酸奶', '创可贴, 大号', '螺丝刀'].includes(i.name)) await call('DELETE', `/api/items/${i.id}?purge=1`);
   r = await json('DELETE', `/api/locations/${shelf.id}`);

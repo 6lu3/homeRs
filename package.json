@@ -7,6 +7,6 @@
   "engines": { "node": ">=22.5" },
   "scripts": {
     "start": "node --no-warnings server.js",
-    "test": "node test/parse.test.js && node test/vocab.test.js && node test/menu.test.js && node test/menu-cal.test.js && node test/receipt.test.js && node test/receipt-service.test.js && node test/provider-guard.test.js && node test/asr.test.js && node test/asr-service.test.js && node test/img-scale.test.js && node test/wav.test.js && node test/smoke.js"
+    "test": "node test/parse.test.js && node test/vocab.test.js && node test/menu.test.js && node test/menu-cal.test.js && node test/study.test.js && node test/receipt.test.js && node test/receipt-service.test.js && node test/provider-guard.test.js && node test/asr.test.js && node test/asr-service.test.js && node test/img-scale.test.js && node test/wav.test.js && node test/smoke.js"
   }
 }

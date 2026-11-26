@@ -784,19 +784,60 @@
   }
 
   // ---------- 学习计划 ----------
-  const study = { pane: 'day', date: null, month: null, plans: [], openPlan: null, planItems: [], daySeq: 0, monthSeq: 0, planSeq: 0, editing: null, saving: false };
+  const study = { pane: 'day', date: null, month: null, member: null, members: [], plans: [], openPlan: null, planItems: [], daySeq: 0, monthSeq: 0, planSeq: 0, editing: null, saving: false };
   const dayLabel = s => `${Number(s.slice(5, 7))}月${Number(s.slice(8, 10))}日 ${WEEKDAYS[parseLocalDate(s).getDay()]}`;
   const daysInclusive = (a, b) => Math.round((parseLocalDate(b) - parseLocalDate(a)) / 86400000) + 1;
   const monthOf = s => s.slice(0, 7);
   const addMonths = (m, n) => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 1 + n, 1); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
   const monthText = m => `${m.slice(0, 4)}年${Number(m.slice(5))}月`;
   const rangeText = (a, b) => `${a.slice(0, 4) === b.slice(0, 4) ? '' : a.slice(0, 4) + '/'}${mdLabel(a)} – ${a.slice(0, 4) === b.slice(0, 4) ? '' : b.slice(0, 4) + '/'}${mdLabel(b)}`;
+  const memberName = id => (study.members.find(m => m.id === id) || {}).name || '';
+  // 选中的成员记在这台设备上；隐私模式下 localStorage 可能抛错，忽略即可
+  const savedMember = () => { try { return Number(localStorage.getItem('study_member')); } catch { return 0; } };
+  const saveMember = id => { try { localStorage.setItem('study_member', String(id)); } catch { /* 忽略 */ } };
 
-  function enterStudy() {
+  let studyEnterSeq = 0;
+  async function enterStudy() {
     study.date = todayStr();   // 每次进入都回到今天：打开就能看到今天要学什么
     if (!study.month) study.month = monthOf(todayStr());
+    const seq = ++studyEnterSeq;
+    try {
+      const members = await api('/api/study/members');
+      if (seq !== studyEnterSeq) return;
+      study.members = members;
+      // 本机记住的成员已不存在（或没记过）时，回退到第一位
+      study.member = (members.find(m => m.id === savedMember()) || members[0]).id;
+    } catch (err) { if (seq === studyEnterSeq) toast(err.message); return; }
+    renderStudyMembers();
     showStudyPane(study.pane);
   }
+  function renderStudyMembers() {
+    $('#study-members').innerHTML = study.members.map(m => `<button type="button" class="study-member${m.id === study.member ? ' active' : ''}" data-id="${m.id}">${esc(m.name)}</button>`).join('')
+      + '<button type="button" class="btn small" id="study-rename">改名</button>';
+  }
+  $('#study-members').addEventListener('click', async e => {
+    if (e.target.closest('#study-rename')) {
+      const r = await askText('给「' + memberName(study.member) + '」改名', { value: memberName(study.member), placeholder: '最长 20 字' });
+      if (r == null || r === '') return;
+      try {
+        await postJson('/api/study/members/' + study.member, { name: r }, 'PUT');
+        study.members = await api('/api/study/members');
+        renderStudyMembers();
+        if (study.pane === 'plans' && study.editing == null) renderStudyPlans();
+      } catch (err) { toast(err.message); }
+      return;
+    }
+    const b = e.target.closest('.study-member');
+    if (!b || Number(b.dataset.id) === study.member) return;
+    study.member = Number(b.dataset.id);
+    saveMember(study.member);
+    study.openPlan = null;
+    // 先清掉上一位的内容再加载，避免短暂显示别人的计划
+    $('#sd-body').innerHTML = ''; $('#sm-body').innerHTML = ''; $('#sp-body').innerHTML = '';
+    renderStudyMembers();
+    showStudyPane(study.pane);
+  });
+
   function showStudyPane(p) {
     study.pane = p;
     $$('.study-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === p));
@@ -814,7 +855,7 @@
     study.date = date;
     $('#sd-label').innerHTML = esc(dayLabel(date)) + (date === todayStr() ? ' <span class="badge menu-cur">今天</span>' : '');
     try {
-      const data = await api('/api/study/day?date=' + encodeURIComponent(date));
+      const data = await api('/api/study/day?date=' + encodeURIComponent(date) + '&member=' + study.member);
       if (seq !== study.daySeq) return;
       renderStudyDay(data);
     } catch (err) {
@@ -860,7 +901,7 @@
     study.month = month;
     $('#sm-label').innerHTML = esc(monthText(month)) + (month === monthOf(todayStr()) ? ' <span class="badge menu-cur">本月</span>' : '');
     try {
-      const data = await api('/api/study/month?month=' + encodeURIComponent(month));
+      const data = await api('/api/study/month?month=' + encodeURIComponent(month) + '&member=' + study.member);
       if (seq !== study.monthSeq) return;
       renderStudyMonth(data);
     } catch (err) { if (seq === study.monthSeq) toast(err.message); }
@@ -883,7 +924,7 @@
   async function loadStudyPlans() {
     const seq = ++study.planSeq;
     try {
-      const plans = await api('/api/study/plans');
+      const plans = await api('/api/study/plans?member=' + study.member);
       const items = study.openPlan && plans.some(p => p.id === study.openPlan) ? await api('/api/study/items?plan=' + study.openPlan) : [];
       if (seq !== study.planSeq) return;
       study.plans = plans; study.planItems = items;
@@ -953,6 +994,10 @@
     $('#se-end').value = row.end_date || '';
     $('#se-note').value = row.note || '';
     $('#se-note-wrap').classList.toggle('hidden', ctx.kind === 'plan');
+    // 「谁的计划」只在大计划里出现；新建默认当前选中的成员，编辑默认它现在的归属
+    $('#se-member-wrap').classList.toggle('hidden', ctx.kind !== 'plan');
+    $('#se-member').innerHTML = study.members.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
+    $('#se-member').value = String(row.member_id || study.member);
     $('#se-err').textContent = '';
     $('#study-editor').classList.remove('hidden');
     setTimeout(() => $('#se-name').focus(), 50);
@@ -969,13 +1014,16 @@
     if (!body.start_date || !body.end_date) { $('#se-err').textContent = '请选择开始和结束日期'; return; }
     if (body.end_date < body.start_date) { $('#se-err').textContent = '结束日期不能早于开始日期'; return; }
     if (ctx.kind === 'item') { body.plan_id = ctx.planId; body.note = $('#se-note').value.trim(); }
+    else body.member_id = Number($('#se-member').value);
     const url = '/api/study/' + (ctx.kind === 'plan' ? 'plans' : 'items') + (ctx.row ? '/' + ctx.row.id : '');
     study.saving = true; $('#se-save').disabled = true;
     try {
       await postJson(url, body, ctx.row ? 'PUT' : 'POST');
       study.saving = false;
       closeStudyEditor();
-      if (ctx.kind === 'plan' && !ctx.row) study.openPlan = null;
+      if (ctx.kind === 'plan' && (!ctx.row || body.member_id !== study.member)) study.openPlan = null;
+      // 计划转给了另一位（或新建时选了另一位）：它会从当前列表消失，给个提示
+      if (ctx.kind === 'plan' && body.member_id !== study.member) toast(`已${ctx.row ? '转给' : '建给'}「${memberName(body.member_id)}」`);
       loadStudyPlans();
     } catch (err) { $('#se-err').textContent = err.message; }
     finally { study.saving = false; $('#se-save').disabled = false; }

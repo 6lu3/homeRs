@@ -141,6 +141,7 @@
     <button type="button" id="study-back" class="icon-btn" title="返回"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
     <h2><svg class="ico" aria-hidden="true"><use href="#i-book"></use></svg>学习计划</h2>
   </header>
+  <div id="study-members" class="study-members"></div>
   <div class="study-tabs" role="tablist">
     <button type="button" class="study-tab active" data-pane="day">今天</button>
     <button type="button" class="study-tab" data-pane="month">按月看</button>
@@ -400,6 +401,7 @@
       <label>名称 *<input id="se-name" required maxlength="60" placeholder="例如：Python 基础" autocomplete="off"></label>
       <label>开始日期 *<input id="se-start" type="date" required></label>
       <label>结束日期 *<input id="se-end" type="date" required></label>
+      <label id="se-member-wrap">谁的计划<select id="se-member"></select></label>
       <label id="se-note-wrap">备注<input id="se-note" maxlength="200" placeholder="例如：《xx》第 1–3 章" autocomplete="off"></label>
       <p id="se-err" class="err"></p>
     </div>

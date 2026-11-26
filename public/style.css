@@ -657,6 +657,10 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 }
 
 /* 学习计划 */
+.study-members { display: flex; align-items: center; gap: 6px; padding: 4px 14px 6px; }
+.study-member { flex: 1; min-width: 0; overflow: hidden; padding: 8px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--muted); font: inherit; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; transition: all .2s ease; }
+.study-member.active { border-color: var(--primary); background: var(--primary); color: #fff; font-weight: 600; }
+.study-members .btn { flex: none; }
 .study-tabs { display: flex; gap: 6px; padding: 4px 14px 8px; }
 .study-tab { flex: 1; padding: 8px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; transition: all .2s ease; }
 .study-tab.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
@@ -691,8 +695,8 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .sp-items .btn.block { margin-top: 10px; }
 @media (min-width: 720px) {
   /* 学习计划：宽屏居中；面板里的日期导航不再套用全局 .menu-nav 的缩进规则 */
-  #view-study > .study-tabs, #view-study > .study-pane { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; }
-  #view-study > .study-tabs { padding-right: 0; padding-left: 0; }
+  #view-study > .study-tabs, #view-study > .study-members, #view-study > .study-pane { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; }
+  #view-study > .study-tabs, #view-study > .study-members { padding-right: 0; padding-left: 0; }
   #view-study .study-pane .menu-nav { width: 100%; max-width: none; margin: 0; padding-right: 0; padding-left: 0; }
   #view-study .study-pane > .pad { padding-right: 0; padding-left: 0; }
   .study-tab:hover:not(.active) { background: var(--field-bg); color: var(--text); }
@@ -709,5 +713,5 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 @media (min-width: 900px) {
   /* 桌面端：「今天」的学习项两列并排，「按月看」「大计划」保持单列方便横向对照日期 */
   #view-study #sd-body .sd-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  #view-study > .study-tabs, #view-study > .study-pane { max-width: 960px; }
+  #view-study > .study-tabs, #view-study > .study-members, #view-study > .study-pane { max-width: 960px; }
 }

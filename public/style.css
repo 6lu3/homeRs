@@ -590,7 +590,7 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .tool-txt b { font-size: 16px; font-weight: 600; }
 .tool-txt span { color: var(--muted); font-size: 13px; }
 .tool-card > .ico, .home-tools > .ico { color: var(--muted); }
-.tool-list { padding-top: 6px; }
+.tool-list { display: flex; flex-direction: column; gap: 12px; padding-top: 6px; }
 
 /* 每周菜单 */
 .menu-nav { display: flex; align-items: center; gap: 8px; padding: 4px 14px 8px; }
@@ -690,5 +690,24 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .si-row { display: flex; align-items: center; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .sp-items .btn.block { margin-top: 10px; }
 @media (min-width: 720px) {
-  #view-study > .study-tabs, #view-study > .study-pane { max-width: 720px; }
+  /* 学习计划：宽屏居中；面板里的日期导航不再套用全局 .menu-nav 的缩进规则 */
+  #view-study > .study-tabs, #view-study > .study-pane { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; }
+  #view-study > .study-tabs { padding-right: 0; padding-left: 0; }
+  #view-study .study-pane .menu-nav { width: 100%; max-width: none; margin: 0; padding-right: 0; padding-left: 0; }
+  #view-study .study-pane > .pad { padding-right: 0; padding-left: 0; }
+  .study-tab:hover:not(.active) { background: var(--field-bg); color: var(--text); }
+  .sd-row { padding: 14px 18px; }
+  .sd-name { font-size: 16px; }
+  .sd-meta { font-size: 13px; }
+  .sm-item { padding: 16px 20px; }
+  .sm-grid { grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 6px; }
+  .sm-cell { height: 34px; font-size: 12.5px; }
+  .sp-head { padding: 14px 18px; }
+  .sp-items { padding: 6px 18px 16px; }
+  .sp-head:hover { background: var(--field-bg); }
+}
+@media (min-width: 900px) {
+  /* 桌面端：「今天」的学习项两列并排，「按月看」「大计划」保持单列方便横向对照日期 */
+  #view-study #sd-body .sd-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  #view-study > .study-tabs, #view-study > .study-pane { max-width: 960px; }
 }

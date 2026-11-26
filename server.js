@@ -184,7 +184,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_study_items_plan ON study_items(plan_id);
   CREATE INDEX IF NOT EXISTS idx_study_items_dates ON study_items(start_date, end_date);
   CREATE INDEX IF NOT EXISTS idx_study_checks_date ON study_checks(date);
+  CREATE TABLE IF NOT EXISTS study_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    sort INTEGER NOT NULL DEFAULT 0
+  );
 `);
+// 学习计划的成员（固定两位，只能改名）；旧库的计划全部归第一位。重复启动不会改动已分配的计划（只处理 member_id = 0）
+if (!db.prepare('PRAGMA table_info(study_plans)').all().some(c => c.name === 'member_id')) {
+  db.exec('ALTER TABLE study_plans ADD COLUMN member_id INTEGER NOT NULL DEFAULT 0');
+}
+if (!db.prepare('SELECT 1 FROM study_members LIMIT 1').get()) {
+  db.prepare('INSERT INTO study_members(name, sort) VALUES(?, ?)').run('我', 0);
+  db.prepare('INSERT INTO study_members(name, sort) VALUES(?, ?)').run('TA', 1);
+}
+db.prepare('UPDATE study_plans SET member_id = (SELECT id FROM study_members ORDER BY sort, id LIMIT 1) WHERE member_id = 0').run();
+db.exec('CREATE INDEX IF NOT EXISTS idx_study_plans_member ON study_plans(member_id)');
 
 // 首次运行：预置常见位置，方便直接上手
 if (db.prepare('SELECT COUNT(*) AS n FROM locations').get().n === 0) {
@@ -905,7 +920,27 @@ function studyItemFields(b) {
   if (!Number.isInteger(plan_id) || !db.prepare('SELECT 1 FROM study_plans WHERE id = ?').get(plan_id)) throw new HttpError(400, '大计划不存在');
   return { ...f, plan_id, note: String(b.note ?? '').trim() };
 }
-const studyPlanRow = id => db.prepare('SELECT id, name, start_date, end_date FROM study_plans WHERE id = ?').get(id);
+const studyPlanRow = id => db.prepare('SELECT id, member_id, name, start_date, end_date FROM study_plans WHERE id = ?').get(id);
+// 成员 id：必须是存在的成员，否则 400
+function studyMemberId(v) {
+  const n = typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
+  if (!Number.isInteger(n) || !db.prepare('SELECT 1 FROM study_members WHERE id = ?').get(n)) throw new HttpError(400, '成员不存在');
+  return n;
+}
+// 可选的 member 查询参数：没给返回 null；给了就必须有效
+const optMember = url => { const v = url.searchParams.get('member'); return v === null ? null : studyMemberId(v); };
+route('GET', /^\/api\/study\/members$/, (req, res) => {
+  json(res, 200, db.prepare('SELECT id, name FROM study_members ORDER BY sort, id').all());
+});
+route('PUT', /^\/api\/study\/members\/(\d+)$/, async (req, res, [id]) => {
+  const b = (await readJson(req)) || {};
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) throw new HttpError(400, '名称不能为空');
+  if ([...name].length > 20) throw new HttpError(400, '名称最长 20 字');
+  if (!db.prepare('SELECT 1 FROM study_members WHERE id = ?').get(id)) throw new HttpError(404, '成员不存在');
+  db.prepare('UPDATE study_members SET name = ? WHERE id = ?').run(name, id);
+  json(res, 200, { id: Number(id), name });
+});
 const studyItemRow = id => db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items WHERE id = ?').get(id);
 function checkedByItem(ids) {
   const map = new Map(ids.map(id => [id, []]));
@@ -914,18 +949,23 @@ function checkedByItem(ids) {
   return map;
 }
 
-route('GET', /^\/api\/study\/plans$/, (req, res) => {
-  json(res, 200, db.prepare(`SELECT p.id, p.name, p.start_date, p.end_date, (SELECT COUNT(*) FROM study_items i WHERE i.plan_id = p.id) AS item_count FROM study_plans p ORDER BY p.start_date, p.id`).all());
+route('GET', /^\/api\/study\/plans$/, (req, res, _m, url) => {
+  const member = optMember(url);
+  json(res, 200, db.prepare(`SELECT p.id, p.member_id, p.name, p.start_date, p.end_date, (SELECT COUNT(*) FROM study_items i WHERE i.plan_id = p.id) AS item_count FROM study_plans p WHERE (? IS NULL OR p.member_id = ?) ORDER BY p.start_date, p.id`).all(member, member));
 });
 route('POST', /^\/api\/study\/plans$/, async (req, res) => {
-  const f = studyFields(await readJson(req));
-  const id = db.prepare('INSERT INTO study_plans(name, start_date, end_date, created_at) VALUES(?, ?, ?, ?)').run(f.name, f.start_date, f.end_date, new Date().toISOString()).lastInsertRowid;
+  const b = await readJson(req);
+  const f = studyFields(b);
+  const member_id = studyMemberId(b.member_id);
+  const id = db.prepare('INSERT INTO study_plans(member_id, name, start_date, end_date, created_at) VALUES(?, ?, ?, ?, ?)').run(member_id, f.name, f.start_date, f.end_date, new Date().toISOString()).lastInsertRowid;
   json(res, 200, studyPlanRow(id));
 });
 route('PUT', /^\/api\/study\/plans\/(\d+)$/, async (req, res, [id]) => {
-  const f = studyFields(await readJson(req));
+  const b = await readJson(req);
+  const f = studyFields(b);
+  const member_id = studyMemberId(b.member_id);
   if (!studyPlanRow(id)) throw new HttpError(404, '大计划不存在');
-  db.prepare('UPDATE study_plans SET name = ?, start_date = ?, end_date = ? WHERE id = ?').run(f.name, f.start_date, f.end_date, id);
+  db.prepare('UPDATE study_plans SET member_id = ?, name = ?, start_date = ?, end_date = ? WHERE id = ?').run(member_id, f.name, f.start_date, f.end_date, id);
   json(res, 200, studyPlanRow(id));
 });
 route('DELETE', /^\/api\/study\/plans\/(\d+)$/, (req, res, [id]) => {
@@ -938,8 +978,10 @@ route('DELETE', /^\/api\/study\/plans\/(\d+)$/, (req, res, [id]) => {
 route('GET', /^\/api\/study\/items$/, (req, res, _m, url) => {
   const plan = url.searchParams.get('plan');
   if (plan !== null && !/^\d+$/.test(plan)) throw new HttpError(400, 'plan 参数无效');
-  const rows = plan ? db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items WHERE plan_id = ? ORDER BY start_date, id').all(Number(plan))
-    : db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items ORDER BY start_date, id').all();
+  const member = optMember(url);
+  const planId = plan === null ? null : Number(plan);
+  const rows = db.prepare('SELECT i.id, i.plan_id, i.name, i.note, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id WHERE (? IS NULL OR i.plan_id = ?) AND (? IS NULL OR p.member_id = ?) ORDER BY i.start_date, i.id')
+    .all(planId, planId, member, member);
   const checked = checkedByItem(rows.map(r => r.id));
   json(res, 200, rows.map(r => ({ ...r, checked: checked.get(r.id) })));
 });
@@ -963,8 +1005,9 @@ route('DELETE', /^\/api\/study\/items\/(\d+)$/, (req, res, [id]) => {
 // 某一天要学的 + 即将开始的
 route('GET', /^\/api\/study\/day$/, (req, res, _m, url) => {
   const date = studyDate(url.searchParams.get('date'));
+  const member = studyMemberId(url.searchParams.get('member'));
   const today = localDate();
-  const rows = db.prepare('SELECT i.id, i.plan_id, p.name AS plan_name, i.name, i.note, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id ORDER BY i.end_date, i.id').all();
+  const rows = db.prepare('SELECT i.id, i.plan_id, p.name AS plan_name, i.name, i.note, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id WHERE p.member_id = ? ORDER BY i.end_date, i.id').all(member);
   const today_items = study.itemsOnDate(rows, date);
   const later = study.upcoming(rows, date, 3);
   const checked = checkedByItem(today_items.map(r => r.id));
@@ -980,8 +1023,9 @@ route('GET', /^\/api\/study\/day$/, (req, res, _m, url) => {
 // 某个月里每个学习项占哪几天、哪几天已勾选
 route('GET', /^\/api\/study\/month$/, (req, res, _m, url) => {
   const month = url.searchParams.get('month') || '';
+  const member = studyMemberId(url.searchParams.get('member'));
   let layout;
-  const rows = db.prepare('SELECT i.id, i.plan_id, p.name AS plan_name, i.name, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id ORDER BY i.start_date, i.id').all();
+  const rows = db.prepare('SELECT i.id, i.plan_id, p.name AS plan_name, i.name, i.start_date, i.end_date FROM study_items i JOIN study_plans p ON p.id = i.plan_id WHERE p.member_id = ? ORDER BY i.start_date, i.id').all(member);
   try { layout = study.monthLayout(rows, month); } catch (e) { throw new HttpError(400, e.message); }
   const [y, mo] = month.split('-').map(Number);
   const byId = new Map(rows.map(r => [r.id, r]));

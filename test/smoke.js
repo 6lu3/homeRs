@@ -208,7 +208,39 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
 
   // 学习计划（用远期日期，避免撞到真实数据）
   {
-    const P = { name: '冒烟学习计划', start_date: '2031-01-01', end_date: '2031-06-30' };
+    // 成员：固定两位，可改名
+    r = await call('GET', '/api/study/members');
+    assert(r.status === 200 && r.body.length === 2, '学习成员：默认有两位');
+    const [m1, m2] = r.body;
+    const oldName = m1.name;
+    r = await json('PUT', `/api/study/members/${m1.id}`, { name: '  冒烟成员  ' });
+    assert(r.status === 200 && r.body.name === '冒烟成员', '学习成员：改名并去掉首尾空白');
+    r = await json('PUT', `/api/study/members/${m1.id}`, { name: '   ' });
+    assert(r.status === 400 && r.body.error === '名称不能为空', '学习成员：空名被拒绝');
+    r = await json('PUT', `/api/study/members/${m1.id}`, { name: 'x'.repeat(21) });
+    assert(r.status === 400 && r.body.error === '名称最长 20 字', '学习成员：超过 20 字被拒绝');
+    r = await json('PUT', '/api/study/members/999999', { name: '甲' });
+    assert(r.status === 404 && r.body.error === '成员不存在', '学习成员：不存在返回 404');
+    r = await call('GET', '/api/study/members');
+    assert(r.body[0].name === '冒烟成员', '学习成员：改名后列表更新，且未被失败的请求改动');
+    await json('PUT', `/api/study/members/${m1.id}`, { name: oldName });
+
+    const P = { name: '冒烟学习计划', member_id: m1.id, start_date: '2031-01-01', end_date: '2031-06-30' };
+    r = await json('POST', '/api/study/plans', { ...P, member_id: undefined });
+    assert(r.status === 400 && r.body.error === '成员不存在', '学习计划：缺 member_id 被拒绝');
+    r = await json('POST', '/api/study/plans', { ...P, member_id: 999999 });
+    assert(r.status === 400 && r.body.error === '成员不存在', '学习计划：member_id 不存在被拒绝');
+    r = await call('GET', '/api/study/plans?member=abc');
+    assert(r.status === 400, '学习计划：plans 的 member 参数非法被拒绝');
+    r = await call('GET', '/api/study/items?member=abc');
+    assert(r.status === 400, '学习计划：items 的 member 参数非法被拒绝');
+    for (const q of ['', '&member=abc', '&member=999999', '&member=0']) {
+      r = await call('GET', `/api/study/day?date=2031-03-03${q}`);
+      assert(r.status === 400 && r.body.error === '成员不存在', `学习计划：day 的 member 缺失或非法被拒绝（${q || '缺失'}）`);
+      r = await call('GET', `/api/study/month?month=2031-03${q}`);
+      assert(r.status === 400 && r.body.error === '成员不存在', `学习计划：month 的 member 缺失或非法被拒绝（${q || '缺失'}）`);
+    }
+
     r = await json('POST', '/api/study/plans', { ...P, name: '  ' });
     assert(r.status === 400 && r.body.error === '名称不能为空', '学习计划：空名称被拒绝');
     r = await json('POST', '/api/study/plans', { ...P, end_date: '2030-12-31' });
@@ -238,7 +270,7 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     const itLater = r.body;
 
     // 某天要学什么
-    r = await call('GET', '/api/study/day?date=2031-03-03');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
     const mine = r.body.items.find(x => x.id === it.id);
     assert(r.status === 200 && mine && mine.dayIndex === 3 && mine.total === 10 && mine.checked === false && mine.done === 0, '学习计划：当天列出覆盖它的项，第 3 天 / 共 10 天');
     assert(mine.plan_name === '冒烟学习计划' && mine.note === '第一章起', '学习计划：当天返回大计划名和备注');
@@ -246,23 +278,23 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(r.body.upcoming.some(x => x.id === itLater.id), '学习计划：开始日在后的项出现在即将开始');
     r = await call('GET', '/api/study/day');
     assert(r.status === 400, '学习计划：缺 date 被拒绝');
-    r = await call('GET', '/api/study/day?date=2031-02-30');
+    r = await call('GET', `/api/study/day?date=2031-02-30&member=${m1.id}`);
     assert(r.status === 400, '学习计划：非法 date 被拒绝');
 
     // 勾选
     r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: true });
     assert(r.status === 200 && r.body.checked === true, '学习计划：范围内勾选成功');
     await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: true });
-    r = await call('GET', '/api/study/day?date=2031-03-03');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
     let m = r.body.items.find(x => x.id === it.id);
     assert(m.checked === true && m.done === 1, '学习计划：重复勾选不产生重复记录');
     r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-11', checked: true });
     assert(r.status === 400 && r.body.error === '这一天不在该学习项的日期范围内', '学习计划：范围外勾选被拒绝');
-    r = await call('GET', '/api/study/day?date=2031-03-03');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
     assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：被拒绝的勾选没有写入');
     r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: 'true' });
     assert(r.status === 400, '学习计划：checked 不是布尔值被拒绝');
-    r = await call('GET', '/api/study/day?date=2031-03-03');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
     assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：checked 格式错误时不会误删已有勾选');
     r = await json('PUT', '/api/study/check', { item_id: 999999, date: '2031-03-03', checked: true });
     assert(r.status === 404, '学习计划：勾选不存在的项返回 404');
@@ -272,10 +304,10 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     // 改日期不丢勾选
     r = await json('PUT', `/api/study/items/${it.id}`, { ...I, start_date: '2031-03-05', end_date: '2031-03-10' });
     assert(r.status === 200, '学习计划：修改学习项日期');
-    r = await call('GET', '/api/study/day?date=2031-03-05');
+    r = await call('GET', `/api/study/day?date=2031-03-05&member=${m1.id}`);
     assert(r.body.items.find(x => x.id === it.id).done === 0, '学习计划：勾选被挤出范围后不计入进度');
     r = await json('PUT', `/api/study/items/${it.id}`, I);
-    r = await call('GET', '/api/study/day?date=2031-03-05');
+    r = await call('GET', `/api/study/day?date=2031-03-05&member=${m1.id}`);
     assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：日期改回后原有勾选恢复计入');
 
     // 列表与按月
@@ -284,14 +316,45 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(r.status === 200 && li && li.checked.includes('2031-03-03') && !r.body.some(x => x.id === itB.id), '学习计划：按大计划列出学习项及已勾选日期');
     r = await call('GET', '/api/study/plans');
     assert(r.body.find(x => x.id === plan.id).item_count === 3, '学习计划：大计划列表带项数');
-    r = await call('GET', '/api/study/month?month=2031-03');
+    r = await call('GET', `/api/study/month?month=2031-03&member=${m1.id}`);
     const mi = r.body.items.find(x => x.id === it.id);
     assert(r.status === 200 && r.body.daysInMonth === 31 && mi && mi.days.length === 10 && mi.days[0] === 1 && JSON.stringify(mi.checked) === '[3]', '学习计划：按月返回占的日号和已勾选日号');
     assert(!r.body.items.some(x => x.id === itOut.id), '学习计划：按月不含与该月无交集的项');
-    r = await call('GET', '/api/study/month?month=2031-13');
+    r = await call('GET', `/api/study/month?month=2031-13&member=${m1.id}`);
     assert(r.status === 400, '学习计划：非法月份被拒绝');
     r = await call('GET', '/api/study/items?plan=abc');
     assert(r.status === 400, '学习计划：plan 参数不是数字被拒绝');
+
+    // 两位成员互相隔离；转移计划后归属跟着变，勾选保留
+    r = await json('POST', '/api/study/plans', { ...P, name: '冒烟乙方计划', member_id: m2.id });
+    assert(r.status === 200 && r.body.member_id === m2.id, '学习成员：给第二位成员建计划');
+    const planM2 = r.body;
+    r = await json('POST', '/api/study/items', { plan_id: planM2.id, name: '乙方的项', start_date: '2031-03-01', end_date: '2031-03-10' });
+    const itM2 = r.body;
+    r = await json('PUT', '/api/study/check', { item_id: itM2.id, date: '2031-03-03', checked: true });
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
+    assert(!r.body.items.some(x => x.id === itM2.id), '学习成员：第一位的今天看不到第二位的项');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m2.id}`);
+    assert(r.body.items.some(x => x.id === itM2.id) && !r.body.items.some(x => x.id === it.id), '学习成员：第二位的今天只有自己的项');
+    r = await call('GET', `/api/study/day?date=2031-03-12&member=${m1.id}`);
+    assert(!r.body.upcoming.some(x => x.id === itM2.id), '学习成员：即将开始也只含自己的');
+    r = await call('GET', `/api/study/plans?member=${m1.id}`);
+    assert(r.body.some(x => x.id === plan.id) && !r.body.some(x => x.id === planM2.id), '学习成员：计划列表按成员过滤');
+    r = await call('GET', `/api/study/items?member=${m2.id}`);
+    assert(r.body.some(x => x.id === itM2.id) && !r.body.some(x => x.id === it.id), '学习成员：学习项列表按成员过滤');
+    r = await call('GET', `/api/study/month?month=2031-03&member=${m1.id}`);
+    assert(!r.body.items.some(x => x.id === itM2.id), '学习成员：按月也按成员过滤');
+    r = await json('PUT', `/api/study/plans/${planM2.id}`, { name: '冒烟乙方计划', member_id: m1.id, start_date: '2031-01-01', end_date: '2031-06-30' });
+    assert(r.status === 200 && r.body.member_id === m1.id, '学习成员：把计划转给第一位');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
+    const moved = r.body.items.find(x => x.id === itM2.id);
+    assert(moved && moved.done === 1, '学习成员：转移后第一位看得到，勾选没有丢');
+    r = await call('GET', `/api/study/day?date=2031-03-03&member=${m2.id}`);
+    assert(!r.body.items.some(x => x.id === itM2.id), '学习成员：转移后第二位看不到');
+    r = await json('PUT', `/api/study/plans/${planM2.id}`, { name: '冒烟乙方计划', member_id: 999999, start_date: '2031-01-01', end_date: '2031-06-30' });
+    assert(r.status === 400 && r.body.error === '成员不存在', '学习成员：转给不存在的成员被拒绝');
+    await call('DELETE', `/api/study/plans/${planM2.id}`);
+
     r = await json('PUT', '/api/study/check', { item_id: true, date: '2031-03-03', checked: true });
     assert(r.status === 404, '学习计划：item_id 不是整数时不会误操作 id=1 的项');
 

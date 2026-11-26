@@ -36,6 +36,7 @@
   <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.6 2.6L16.5 9"/></symbol>
   <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0 5 5l-8.5 8.5a2.1 2.1 0 0 1-3-3l8.5-8.5a4 4 0 0 0-2-2z"/><path d="M14.7 6.3a4 4 0 0 1 5.4-2.4l-2.4 2.4.6 1.4 1.4.6 2.4-2.4"/></symbol>
   <symbol id="i-utensils" viewBox="0 0 24 24"><path d="M6.5 3.5v6.2a2 2 0 0 0 4 0V3.5M8.5 3.5v17"/><path d="M17.5 20.5v-17c-2.2 1.2-3.2 3.8-3.2 6.5 0 1.6 1.2 2.6 3.2 2.6"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5z"/><path d="M20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z"/></symbol>
   <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m14.5 6-6 6 6 6"/></symbol>
   <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6"/></symbol>
 </svg>
@@ -126,6 +127,45 @@
       <span class="tool-txt"><b>每周菜单</b><span>安排一周三餐，一键生成采购</span></span>
       <svg class="ico" aria-hidden="true"><use href="#i-chevron-right"></use></svg>
     </button>
+    <button type="button" class="tool-card" data-tool="study">
+      <span class="tool-ico"><svg class="ico" aria-hidden="true"><use href="#i-book"></use></svg></span>
+      <span class="tool-txt"><b>学习计划</b><span>按日期安排每天要学的内容</span></span>
+      <svg class="ico" aria-hidden="true"><use href="#i-chevron-right"></use></svg>
+    </button>
+  </div>
+</section>
+
+<!-- 学习计划 -->
+<section id="view-study" class="screen subview hidden">
+  <header class="topbar">
+    <button type="button" id="study-back" class="icon-btn" title="返回"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+    <h2><svg class="ico" aria-hidden="true"><use href="#i-book"></use></svg>学习计划</h2>
+  </header>
+  <div class="study-tabs" role="tablist">
+    <button type="button" class="study-tab active" data-pane="day">今天</button>
+    <button type="button" class="study-tab" data-pane="month">按月看</button>
+    <button type="button" class="study-tab" data-pane="plans">大计划</button>
+  </div>
+  <div id="study-day" class="study-pane">
+    <div class="menu-nav">
+      <button type="button" id="sd-prev" class="icon-btn" title="前一天"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+      <span id="sd-label" class="menu-range"></span>
+      <button type="button" id="sd-next" class="icon-btn" title="后一天"><svg class="ico" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+      <button type="button" id="sd-today" class="btn small">今天</button>
+    </div>
+    <div id="sd-body" class="pad"></div>
+  </div>
+  <div id="study-month" class="study-pane hidden">
+    <div class="menu-nav">
+      <button type="button" id="sm-prev" class="icon-btn" title="上一月"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
+      <span id="sm-label" class="menu-range"></span>
+      <button type="button" id="sm-next" class="icon-btn" title="下一月"><svg class="ico" aria-hidden="true"><use href="#i-chevron-right"></use></svg></button>
+      <button type="button" id="sm-today" class="btn small">本月</button>
+    </div>
+    <div id="sm-body" class="pad"></div>
+  </div>
+  <div id="study-plans" class="study-pane hidden">
+    <div id="sp-body" class="pad"></div>
   </div>
 </section>
 
@@ -345,6 +385,25 @@
       <button type="button" class="btn block" id="me-add">＋ 添加一道菜</button>
     </div>
   </div>
+</div>
+
+<!-- 学习计划：新建 / 编辑大计划或学习项 -->
+<div id="study-editor" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <form id="se-form" class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="se-cancel">取消</button>
+      <strong id="se-title"></strong>
+      <button type="submit" class="btn small primary" id="se-save">保存</button>
+    </div>
+    <div class="sheet-scroll">
+      <label>名称 *<input id="se-name" required maxlength="60" placeholder="例如：Python 基础" autocomplete="off"></label>
+      <label>开始日期 *<input id="se-start" type="date" required></label>
+      <label>结束日期 *<input id="se-end" type="date" required></label>
+      <label id="se-note-wrap">备注<input id="se-note" maxlength="200" placeholder="例如：《xx》第 1–3 章" autocomplete="off"></label>
+      <p id="se-err" class="err"></p>
+    </div>
+  </form>
 </div>
 
 <!-- 通用对话框（代替浏览器 prompt / confirm，部分内嵌浏览器不支持原生弹窗） -->

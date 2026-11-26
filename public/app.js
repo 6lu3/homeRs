@@ -524,6 +524,7 @@
     if (view === 'shopping') { $('#view-shopping').classList.remove('hidden'); renderShopping(); }
     if (view === 'tools') $('#view-tools').classList.remove('hidden');
     if (view === 'menu') { $('#view-menu').classList.remove('hidden'); enterMenu(); }
+    if (view === 'study') { $('#view-study').classList.remove('hidden'); enterStudy(); }
   }
   // ---------- 每周菜单 ----------
   const MEAL_NAMES = { breakfast: '早', lunch: '午', dinner: '晚' };
@@ -781,6 +782,196 @@
     if (!item) { try { const all = await api('/api/items'); item = all.find(i => i.id === id); } catch {} }
     if (item) openEditor(item); else toast('物品不存在');
   }
+
+  // ---------- 学习计划 ----------
+  const study = { pane: 'day', date: null, month: null, plans: [], openPlan: null, planItems: [], daySeq: 0, monthSeq: 0, planSeq: 0, editing: null, saving: false };
+  const dayLabel = s => `${Number(s.slice(5, 7))}月${Number(s.slice(8, 10))}日 ${WEEKDAYS[parseLocalDate(s).getDay()]}`;
+  const daysInclusive = (a, b) => Math.round((parseLocalDate(b) - parseLocalDate(a)) / 86400000) + 1;
+  const monthOf = s => s.slice(0, 7);
+  const addMonths = (m, n) => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 1 + n, 1); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
+  const monthText = m => `${m.slice(0, 4)}年${Number(m.slice(5))}月`;
+  const rangeText = (a, b) => `${a.slice(0, 4) === b.slice(0, 4) ? '' : a.slice(0, 4) + '/'}${mdLabel(a)} – ${a.slice(0, 4) === b.slice(0, 4) ? '' : b.slice(0, 4) + '/'}${mdLabel(b)}`;
+
+  function enterStudy() {
+    if (!study.date) study.date = todayStr();
+    if (!study.month) study.month = monthOf(todayStr());
+    showStudyPane(study.pane);
+  }
+  function showStudyPane(p) {
+    study.pane = p;
+    $$('.study-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === p));
+    $$('.study-pane').forEach(el => el.classList.toggle('hidden', el.id !== 'study-' + p));
+    if (p === 'day') loadStudyDay(study.date);
+    else if (p === 'month') loadStudyMonth(study.month);
+    else loadStudyPlans();
+  }
+  $$('.study-tab').forEach(t => t.addEventListener('click', () => showStudyPane(t.dataset.pane)));
+  $('#study-back').addEventListener('click', () => switchView('tools'));
+
+  // 今天
+  async function loadStudyDay(date) {
+    const seq = ++study.daySeq;
+    study.date = date;
+    $('#sd-label').innerHTML = esc(dayLabel(date)) + (date === todayStr() ? ' <span class="badge menu-cur">今天</span>' : '');
+    try {
+      const data = await api('/api/study/day?date=' + encodeURIComponent(date));
+      if (seq !== study.daySeq) return;
+      renderStudyDay(data);
+    } catch (err) { if (seq === study.daySeq) toast(err.message); }
+  }
+  function renderStudyDay(d) {
+    const rows = d.items.map(it => `
+      <div class="sd-row${it.checked ? ' done' : ''}">
+        <button type="button" class="sd-check" data-id="${it.id}" data-checked="${it.checked ? 1 : 0}" aria-label="${it.checked ? '取消完成' : '标记学完'}：${esc(it.name)}">${it.checked ? '✓' : ''}</button>
+        <div class="sd-main">
+          <div class="sd-name">${esc(it.name)}</div>
+          <div class="sd-meta">第 ${it.dayIndex} 天 / 共 ${it.total} 天　已学 ${it.done} 天　${esc(rangeText(it.start_date, it.end_date))}</div>
+          ${it.note ? `<div class="sd-note">${esc(it.note)}</div>` : ''}
+          <div class="sd-meta">${esc(it.plan_name)}${it.missed > 0 ? ` <span class="sd-missed">已落下 ${it.missed} 天</span>` : ''}</div>
+        </div>
+      </div>`).join('');
+    const later = d.upcoming.length ? `
+      <h3 class="sd-sub">即将开始</h3>
+      <div class="home-list">${d.upcoming.map(u => `<div class="home-row"><span class="nm">${esc(u.name)}</span><span class="meta">${esc(mdLabel(u.start_date))} 开始 · ${esc(u.plan_name)}</span></div>`).join('')}</div>` : '';
+    $('#sd-body').innerHTML = (rows ? `<h3 class="sd-sub">这一天要学（${d.items.length} 项）</h3><div class="sd-list">${rows}</div>`
+      : `<p class="muted sd-empty">这一天没有安排。到「大计划」里添加学习项吧。</p>`) + later;
+  }
+  $('#sd-body').addEventListener('click', async e => {
+    const b = e.target.closest('.sd-check');
+    if (!b || b.disabled) return;
+    b.disabled = true;
+    const date = study.date;
+    try {
+      await postJson('/api/study/check', { item_id: Number(b.dataset.id), date, checked: b.dataset.checked !== '1' }, 'PUT');
+      if (study.date === date) await loadStudyDay(date);
+    } catch (err) { toast(err.message); b.disabled = false; }
+  });
+  $('#sd-prev').addEventListener('click', () => loadStudyDay(addDaysStr(study.date, -1)));
+  $('#sd-next').addEventListener('click', () => loadStudyDay(addDaysStr(study.date, 1)));
+  $('#sd-today').addEventListener('click', () => loadStudyDay(todayStr()));
+
+  // 按月看
+  async function loadStudyMonth(month) {
+    const seq = ++study.monthSeq;
+    study.month = month;
+    $('#sm-label').innerHTML = esc(monthText(month)) + (month === monthOf(todayStr()) ? ' <span class="badge menu-cur">本月</span>' : '');
+    try {
+      const data = await api('/api/study/month?month=' + encodeURIComponent(month));
+      if (seq !== study.monthSeq) return;
+      renderStudyMonth(data);
+    } catch (err) { if (seq === study.monthSeq) toast(err.message); }
+  }
+  function renderStudyMonth(d) {
+    const today = todayStr();
+    const todayDay = monthOf(today) === d.month ? Number(today.slice(8)) : 0;
+    $('#sm-body').innerHTML = d.items.length ? d.items.map(it => {
+      const on = new Set(it.days), done = new Set(it.checked);
+      let cells = '';
+      for (let i = 1; i <= d.daysInMonth; i++) cells += `<span class="sm-cell${on.has(i) ? ' on' : ''}${done.has(i) ? ' done' : ''}${i === todayDay ? ' today' : ''}" title="${i}日">${i}</span>`;
+      return `<div class="sm-item"><div class="sm-title"><b>${esc(it.name)}</b><span class="meta">${esc(it.plan_name)} · ${esc(rangeText(it.start_date, it.end_date))}</span></div><div class="sm-grid">${cells}</div></div>`;
+    }).join('') : '<p class="muted sd-empty">这个月没有安排。</p>';
+  }
+  $('#sm-prev').addEventListener('click', () => loadStudyMonth(addMonths(study.month, -1)));
+  $('#sm-next').addEventListener('click', () => loadStudyMonth(addMonths(study.month, 1)));
+  $('#sm-today').addEventListener('click', () => loadStudyMonth(monthOf(todayStr())));
+
+  // 大计划
+  async function loadStudyPlans() {
+    const seq = ++study.planSeq;
+    try {
+      const plans = await api('/api/study/plans');
+      const items = study.openPlan && plans.some(p => p.id === study.openPlan) ? await api('/api/study/items?plan=' + study.openPlan) : [];
+      if (seq !== study.planSeq) return;
+      study.plans = plans; study.planItems = items;
+      if (study.openPlan && !plans.some(p => p.id === study.openPlan)) study.openPlan = null;
+      renderStudyPlans();
+    } catch (err) { if (seq === study.planSeq) toast(err.message); }
+  }
+  function renderStudyPlans() {
+    const plan = study.plans.find(p => p.id === study.openPlan);
+    const itemRows = it => {
+      const done = new Set(it.checked.filter(c => c >= it.start_date && c <= it.end_date)).size;
+      const out = plan && (it.start_date < plan.start_date || it.end_date > plan.end_date);
+      return `<div class="si-row">
+        <div class="si-main"><div class="sd-name">${esc(it.name)}</div>
+          <div class="sd-meta">${esc(rangeText(it.start_date, it.end_date))}　已学 ${done} / ${daysInclusive(it.start_date, it.end_date)} 天${out ? ' <span class="sd-missed">超出计划范围</span>' : ''}</div>
+          ${it.note ? `<div class="sd-note">${esc(it.note)}</div>` : ''}</div>
+        <button type="button" class="btn small" data-act="edit-item" data-id="${it.id}">编辑</button>
+        <button type="button" class="btn small danger" data-act="del-item" data-id="${it.id}">删除</button>
+      </div>`;
+    };
+    $('#sp-body').innerHTML = (study.plans.length ? study.plans.map(p => `
+      <div class="sp-card${p.id === study.openPlan ? ' open' : ''}">
+        <div class="sp-head" data-act="toggle" data-id="${p.id}">
+          <div class="sp-info"><b>${esc(p.name)}</b><span class="meta">${esc(rangeText(p.start_date, p.end_date))} · ${p.item_count} 项</span></div>
+          <button type="button" class="btn small" data-act="edit-plan" data-id="${p.id}">编辑</button>
+          <button type="button" class="btn small danger" data-act="del-plan" data-id="${p.id}">删除</button>
+        </div>
+        ${p.id === study.openPlan ? `<div class="sp-items">${study.planItems.map(itemRows).join('') || '<p class="muted">还没有学习项。</p>'}
+          <button type="button" class="btn block" data-act="add-item" data-id="${p.id}">＋ 添加学习项</button></div>` : ''}
+      </div>`).join('') : '<p class="muted sd-empty">还没有大计划。先建一个，比如「2027 上半年」。</p>')
+      + '<button type="button" class="btn primary block" data-act="add-plan">＋ 新建大计划</button>';
+  }
+  $('#sp-body').addEventListener('click', async e => {
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act, id = Number(el.dataset.id);
+    if (act === 'toggle') { study.openPlan = study.openPlan === id ? null : id; loadStudyPlans(); return; }
+    if (act === 'add-plan') return openStudyEditor({ kind: 'plan' });
+    if (act === 'edit-plan') return openStudyEditor({ kind: 'plan', row: study.plans.find(p => p.id === id) });
+    if (act === 'add-item') return openStudyEditor({ kind: 'item', planId: id });
+    if (act === 'edit-item') return openStudyEditor({ kind: 'item', planId: study.openPlan, row: study.planItems.find(i => i.id === id) });
+    try {
+      if (act === 'del-plan') {
+        const p = study.plans.find(x => x.id === id);
+        if (!await askConfirm(`删除大计划「${p.name}」？会同时删除其下 ${p.item_count} 个学习项及全部勾选记录，无法恢复。`, { okText: '删除', danger: true })) return;
+        await api('/api/study/plans/' + id, { method: 'DELETE' });
+        if (study.openPlan === id) study.openPlan = null;
+      } else if (act === 'del-item') {
+        const it = study.planItems.find(x => x.id === id);
+        if (!await askConfirm(`删除学习项「${it.name}」？它的勾选记录也会一起删除。`, { okText: '删除', danger: true })) return;
+        await api('/api/study/items/' + id, { method: 'DELETE' });
+      } else return;
+      loadStudyPlans();
+    } catch (err) { toast(err.message); }
+  });
+
+  // 新建 / 编辑弹层（大计划和学习项共用）
+  function openStudyEditor(ctx) {
+    study.editing = ctx; study.saving = false;
+    const row = ctx.row || {};
+    $('#se-title').textContent = (ctx.row ? '编辑' : '新建') + (ctx.kind === 'plan' ? '大计划' : '学习项');
+    $('#se-name').value = row.name || '';
+    $('#se-start').value = row.start_date || '';
+    $('#se-end').value = row.end_date || '';
+    $('#se-note').value = row.note || '';
+    $('#se-note-wrap').classList.toggle('hidden', ctx.kind === 'plan');
+    $('#se-err').textContent = '';
+    $('#study-editor').classList.remove('hidden');
+    setTimeout(() => $('#se-name').focus(), 50);
+  }
+  function closeStudyEditor() { $('#study-editor').classList.add('hidden'); study.editing = null; }
+  $('#se-cancel').addEventListener('click', closeStudyEditor);
+  $('#study-editor .sheet-backdrop').addEventListener('click', closeStudyEditor);
+  $('#se-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const ctx = study.editing;
+    if (!ctx || study.saving) return;
+    const body = { name: $('#se-name').value.trim(), start_date: $('#se-start').value, end_date: $('#se-end').value };
+    if (!body.name) { $('#se-err').textContent = '名称不能为空'; return; }
+    if (!body.start_date || !body.end_date) { $('#se-err').textContent = '请选择开始和结束日期'; return; }
+    if (body.end_date < body.start_date) { $('#se-err').textContent = '结束日期不能早于开始日期'; return; }
+    if (ctx.kind === 'item') { body.plan_id = ctx.planId; body.note = $('#se-note').value.trim(); }
+    const url = '/api/study/' + (ctx.kind === 'plan' ? 'plans' : 'items') + (ctx.row ? '/' + ctx.row.id : '');
+    study.saving = true; $('#se-save').disabled = true;
+    try {
+      await postJson(url, body, ctx.row ? 'PUT' : 'POST');
+      closeStudyEditor();
+      if (ctx.kind === 'plan' && !ctx.row) study.openPlan = null;
+      loadStudyPlans();
+    } catch (err) { $('#se-err').textContent = err.message; }
+    finally { study.saving = false; $('#se-save').disabled = false; }
+  });
 
   // ---------- 首页仪表盘 ----------
   async function renderHome() {

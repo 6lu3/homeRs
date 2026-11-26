@@ -260,6 +260,10 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(r.status === 400 && r.body.error === '这一天不在该学习项的日期范围内', '学习计划：范围外勾选被拒绝');
     r = await call('GET', '/api/study/day?date=2031-03-03');
     assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：被拒绝的勾选没有写入');
+    r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-03', checked: 'true' });
+    assert(r.status === 400, '学习计划：checked 不是布尔值被拒绝');
+    r = await call('GET', '/api/study/day?date=2031-03-03');
+    assert(r.body.items.find(x => x.id === it.id).done === 1, '学习计划：checked 格式错误时不会误删已有勾选');
     r = await json('PUT', '/api/study/check', { item_id: 999999, date: '2031-03-03', checked: true });
     assert(r.status === 404, '学习计划：勾选不存在的项返回 404');
     r = await json('PUT', '/api/study/check', { item_id: it.id, date: '2031-03-04', checked: false });
@@ -286,6 +290,10 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(!r.body.items.some(x => x.id === itOut.id), '学习计划：按月不含与该月无交集的项');
     r = await call('GET', '/api/study/month?month=2031-13');
     assert(r.status === 400, '学习计划：非法月份被拒绝');
+    r = await call('GET', '/api/study/items?plan=abc');
+    assert(r.status === 400, '学习计划：plan 参数不是数字被拒绝');
+    r = await json('PUT', '/api/study/check', { item_id: true, date: '2031-03-03', checked: true });
+    assert(r.status === 404, '学习计划：item_id 不是整数时不会误操作 id=1 的项');
 
     // 删除
     r = await call('DELETE', `/api/study/items/${itLater.id}`);

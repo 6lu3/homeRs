@@ -793,7 +793,7 @@
   const rangeText = (a, b) => `${a.slice(0, 4) === b.slice(0, 4) ? '' : a.slice(0, 4) + '/'}${mdLabel(a)} – ${a.slice(0, 4) === b.slice(0, 4) ? '' : b.slice(0, 4) + '/'}${mdLabel(b)}`;
 
   function enterStudy() {
-    if (!study.date) study.date = todayStr();
+    study.date = todayStr();   // 每次进入都回到今天：打开就能看到今天要学什么
     if (!study.month) study.month = monthOf(todayStr());
     showStudyPane(study.pane);
   }
@@ -817,12 +817,16 @@
       const data = await api('/api/study/day?date=' + encodeURIComponent(date));
       if (seq !== study.daySeq) return;
       renderStudyDay(data);
-    } catch (err) { if (seq === study.daySeq) toast(err.message); }
+    } catch (err) {
+      if (seq !== study.daySeq) return;
+      $('#sd-body').innerHTML = '<p class="muted sd-empty">加载失败，请点「今天」或翻页重试。</p>';  // 不留旧日期的列表，避免和标签对不上
+      toast(err.message);
+    }
   }
   function renderStudyDay(d) {
     const rows = d.items.map(it => `
       <div class="sd-row${it.checked ? ' done' : ''}">
-        <button type="button" class="sd-check" data-id="${it.id}" data-checked="${it.checked ? 1 : 0}" aria-label="${it.checked ? '取消完成' : '标记学完'}：${esc(it.name)}">${it.checked ? '✓' : ''}</button>
+        <button type="button" class="sd-check" data-id="${it.id}" data-date="${esc(d.date)}" data-checked="${it.checked ? 1 : 0}" aria-label="${it.checked ? '取消完成' : '标记学完'}：${esc(it.name)}">${it.checked ? '✓' : ''}</button>
         <div class="sd-main">
           <div class="sd-name">${esc(it.name)}</div>
           <div class="sd-meta">第 ${it.dayIndex} 天 / 共 ${it.total} 天　已学 ${it.done} 天　${esc(rangeText(it.start_date, it.end_date))}</div>
@@ -840,7 +844,7 @@
     const b = e.target.closest('.sd-check');
     if (!b || b.disabled) return;
     b.disabled = true;
-    const date = study.date;
+    const date = b.dataset.date;  // 用这一行渲染时的日期，而不是可能已被翻页改掉的 study.date
     try {
       await postJson('/api/study/check', { item_id: Number(b.dataset.id), date, checked: b.dataset.checked !== '1' }, 'PUT');
       if (study.date === date) await loadStudyDay(date);
@@ -916,19 +920,22 @@
     const el = e.target.closest('[data-act]');
     if (!el) return;
     const act = el.dataset.act, id = Number(el.dataset.id);
+    const gone = () => { toast('这一项已经不存在了'); loadStudyPlans(); };
     if (act === 'toggle') { study.openPlan = study.openPlan === id ? null : id; loadStudyPlans(); return; }
     if (act === 'add-plan') return openStudyEditor({ kind: 'plan' });
-    if (act === 'edit-plan') return openStudyEditor({ kind: 'plan', row: study.plans.find(p => p.id === id) });
+    if (act === 'edit-plan') { const row = study.plans.find(p => p.id === id); return row ? openStudyEditor({ kind: 'plan', row }) : gone(); }
     if (act === 'add-item') return openStudyEditor({ kind: 'item', planId: id });
-    if (act === 'edit-item') return openStudyEditor({ kind: 'item', planId: study.openPlan, row: study.planItems.find(i => i.id === id) });
+    if (act === 'edit-item') { const row = study.planItems.find(i => i.id === id); return row ? openStudyEditor({ kind: 'item', planId: study.openPlan, row }) : gone(); }
     try {
       if (act === 'del-plan') {
         const p = study.plans.find(x => x.id === id);
+        if (!p) return gone();
         if (!await askConfirm(`删除大计划「${p.name}」？会同时删除其下 ${p.item_count} 个学习项及全部勾选记录，无法恢复。`, { okText: '删除', danger: true })) return;
         await api('/api/study/plans/' + id, { method: 'DELETE' });
         if (study.openPlan === id) study.openPlan = null;
       } else if (act === 'del-item') {
         const it = study.planItems.find(x => x.id === id);
+        if (!it) return gone();
         if (!await askConfirm(`删除学习项「${it.name}」？它的勾选记录也会一起删除。`, { okText: '删除', danger: true })) return;
         await api('/api/study/items/' + id, { method: 'DELETE' });
       } else return;
@@ -938,7 +945,7 @@
 
   // 新建 / 编辑弹层（大计划和学习项共用）
   function openStudyEditor(ctx) {
-    study.editing = ctx; study.saving = false;
+    study.editing = ctx;
     const row = ctx.row || {};
     $('#se-title').textContent = (ctx.row ? '编辑' : '新建') + (ctx.kind === 'plan' ? '大计划' : '学习项');
     $('#se-name').value = row.name || '';
@@ -950,7 +957,7 @@
     $('#study-editor').classList.remove('hidden');
     setTimeout(() => $('#se-name').focus(), 50);
   }
-  function closeStudyEditor() { $('#study-editor').classList.add('hidden'); study.editing = null; }
+  function closeStudyEditor() { if (study.saving) return; $('#study-editor').classList.add('hidden'); study.editing = null; }  // 保存进行中不允许关闭，避免重复提交
   $('#se-cancel').addEventListener('click', closeStudyEditor);
   $('#study-editor .sheet-backdrop').addEventListener('click', closeStudyEditor);
   $('#se-form').addEventListener('submit', async e => {
@@ -966,6 +973,7 @@
     study.saving = true; $('#se-save').disabled = true;
     try {
       await postJson(url, body, ctx.row ? 'PUT' : 'POST');
+      study.saving = false;
       closeStudyEditor();
       if (ctx.kind === 'plan' && !ctx.row) study.openPlan = null;
       loadStudyPlans();

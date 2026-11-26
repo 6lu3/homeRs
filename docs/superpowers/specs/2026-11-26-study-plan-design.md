@@ -61,8 +61,8 @@
 - `daysBetween(start, end)`：含首尾的天数。
 - `itemsOnDate(items, date)`：覆盖该日期的学习项。
 - `upcoming(items, date, limit)`：开始日期晚于该日期的最近几项。
-- `progress(item, checkedDates, today)`：返回 `{total, done, dayIndex, missed}`。`done` 只数落在项日期范围内的勾选；`dayIndex` 为所选日期是该项第几天；`missed` 为范围内已过去（早于 today）但没勾选的天数。
-- `monthLayout(items, year, month)`：每个项在该月占哪几天（供「按月看」渲染）。
+- `progress(item, checkedDates, date, today)`：返回 `{total, done, dayIndex, missed}`。`done` 只数落在项日期范围内的勾选；`dayIndex` 为 `date` 是该项第几天；`missed` 为范围内已过去（早于 today）但没勾选的天数。
+- `monthLayout(items, month)`：`month` 为 `YYYY-MM`，每个项在该月占哪几天（供「按月看」渲染）。
 
 ### 接口（均需登录，错误统一 `{error}`）
 

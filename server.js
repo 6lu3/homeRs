@@ -937,6 +937,7 @@ route('DELETE', /^\/api\/study\/plans\/(\d+)$/, (req, res, [id]) => {
 
 route('GET', /^\/api\/study\/items$/, (req, res, _m, url) => {
   const plan = url.searchParams.get('plan');
+  if (plan !== null && !/^\d+$/.test(plan)) throw new HttpError(400, 'plan 参数无效');
   const rows = plan ? db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items WHERE plan_id = ? ORDER BY start_date, id').all(Number(plan))
     : db.prepare('SELECT id, plan_id, name, note, start_date, end_date FROM study_items ORDER BY start_date, id').all();
   const checked = checkedByItem(rows.map(r => r.id));
@@ -996,11 +997,12 @@ route('GET', /^\/api\/study\/month$/, (req, res, _m, url) => {
 });
 route('PUT', /^\/api\/study\/check$/, async (req, res) => {
   const b = (await readJson(req)) || {};
-  const item = studyItemRow(Number(b.item_id));
+  const item = Number.isInteger(b.item_id) ? studyItemRow(b.item_id) : null;
   if (!item) throw new HttpError(404, '学习项不存在');
   const date = studyDate(b.date);
+  if (typeof b.checked !== 'boolean') throw new HttpError(400, 'checked 应为 true 或 false');
   if (date < item.start_date || date > item.end_date) throw new HttpError(400, '这一天不在该学习项的日期范围内');
-  const checked = b.checked === true;
+  const checked = b.checked;
   if (checked) db.prepare('INSERT OR IGNORE INTO study_checks(item_id, date) VALUES(?, ?)').run(item.id, date);
   else db.prepare('DELETE FROM study_checks WHERE item_id = ? AND date = ?').run(item.id, date);
   json(res, 200, { item_id: item.id, date, checked });

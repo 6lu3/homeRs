@@ -804,10 +804,19 @@
     try {
       const members = await api('/api/study/members');
       if (seq !== studyEnterSeq) return;
+      if (!members.length) throw new Error('没有可用的成员');
       study.members = members;
       // 本机记住的成员已不存在（或没记过）时，回退到第一位
       study.member = (members.find(m => m.id === savedMember()) || members[0]).id;
-    } catch (err) { if (seq === studyEnterSeq) toast(err.message); return; }
+    } catch (err) {
+      if (seq !== studyEnterSeq) return;
+      toast(err.message);
+      // 加载失败：给一个重试入口，并清空面板，免得和成员对不上
+      study.member = null;
+      $('#sd-body').innerHTML = ''; $('#sm-body').innerHTML = ''; $('#sp-body').innerHTML = '';
+      $('#study-members').innerHTML = '<button type="button" class="btn small" id="study-retry">加载失败，点此重试</button>';
+      return;
+    }
     renderStudyMembers();
     showStudyPane(study.pane);
   }
@@ -816,14 +825,14 @@
       + '<button type="button" class="btn small" id="study-rename">改名</button>';
   }
   $('#study-members').addEventListener('click', async e => {
+    if (e.target.closest('#study-retry')) { enterStudy(); return; }
     if (e.target.closest('#study-rename')) {
       const r = await askText('给「' + memberName(study.member) + '」改名', { value: memberName(study.member), placeholder: '最长 20 字' });
       if (r == null || r === '') return;
       try {
-        await postJson('/api/study/members/' + study.member, { name: r }, 'PUT');
-        study.members = await api('/api/study/members');
+        const saved = await postJson('/api/study/members/' + study.member, { name: r }, 'PUT');
+        study.members = study.members.map(m => m.id === saved.id ? { ...m, name: saved.name } : m);  // 直接用返回值，不再多请求一次
         renderStudyMembers();
-        if (study.pane === 'plans' && study.editing == null) renderStudyPlans();
       } catch (err) { toast(err.message); }
       return;
     }
@@ -832,7 +841,9 @@
     study.member = Number(b.dataset.id);
     saveMember(study.member);
     study.openPlan = null;
-    // 先清掉上一位的内容再加载，避免短暂显示别人的计划
+    // 三个面板在路上的旧请求全部作废（不只是当前面板），再清掉上一位的内容，避免回包把别人的数据写回隐藏的面板
+    study.daySeq++; study.monthSeq++; study.planSeq++;
+    study.plans = []; study.planItems = [];
     $('#sd-body').innerHTML = ''; $('#sm-body').innerHTML = ''; $('#sp-body').innerHTML = '';
     renderStudyMembers();
     showStudyPane(study.pane);

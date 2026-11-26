@@ -213,17 +213,23 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(r.status === 200 && r.body.length === 2, '学习成员：默认有两位');
     const [m1, m2] = r.body;
     const oldName = m1.name;
-    r = await json('PUT', `/api/study/members/${m1.id}`, { name: '  冒烟成员  ' });
-    assert(r.status === 200 && r.body.name === '冒烟成员', '学习成员：改名并去掉首尾空白');
-    r = await json('PUT', `/api/study/members/${m1.id}`, { name: '   ' });
-    assert(r.status === 400 && r.body.error === '名称不能为空', '学习成员：空名被拒绝');
-    r = await json('PUT', `/api/study/members/${m1.id}`, { name: 'x'.repeat(21) });
-    assert(r.status === 400 && r.body.error === '名称最长 20 字', '学习成员：超过 20 字被拒绝');
-    r = await json('PUT', '/api/study/members/999999', { name: '甲' });
-    assert(r.status === 404 && r.body.error === '成员不存在', '学习成员：不存在返回 404');
-    r = await call('GET', '/api/study/members');
-    assert(r.body[0].name === '冒烟成员', '学习成员：改名后列表更新，且未被失败的请求改动');
-    await json('PUT', `/api/study/members/${m1.id}`, { name: oldName });
+    try {
+      r = await json('PUT', `/api/study/members/${m1.id}`, { name: '  冒烟成员  ' });
+      assert(r.status === 200 && r.body.name === '冒烟成员', '学习成员：改名并去掉首尾空白');
+      r = await json('PUT', `/api/study/members/${m1.id}`, { name: '   ' });
+      assert(r.status === 400 && r.body.error === '名称不能为空', '学习成员：空名被拒绝');
+      r = await json('PUT', `/api/study/members/${m1.id}`, { name: 'x'.repeat(21) });
+      assert(r.status === 400 && r.body.error === '名称最长 20 字', '学习成员：超过 20 字被拒绝');
+      r = await json('PUT', `/api/study/members/${m1.id}`, { name: 'y'.repeat(20) });
+      assert(r.status === 200, '学习成员：恰好 20 字可以');
+      r = await json('PUT', '/api/study/members/999999', { name: '甲' });
+      assert(r.status === 404 && r.body.error === '成员不存在', '学习成员：不存在返回 404');
+      r = await call('GET', '/api/study/members');
+      assert(r.body[0].name === 'y'.repeat(20), '学习成员：失败的改名请求没有改动名字');
+    } finally {
+      r = await json('PUT', `/api/study/members/${m1.id}`, { name: oldName });  // 无论中途断言是否失败都改回
+    }
+    assert(r.status === 200 && r.body.name === oldName, '学习成员：名字已改回');
 
     const P = { name: '冒烟学习计划', member_id: m1.id, start_date: '2031-01-01', end_date: '2031-06-30' };
     r = await json('POST', '/api/study/plans', { ...P, member_id: undefined });
@@ -329,15 +335,24 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     r = await json('POST', '/api/study/plans', { ...P, name: '冒烟乙方计划', member_id: m2.id });
     assert(r.status === 200 && r.body.member_id === m2.id, '学习成员：给第二位成员建计划');
     const planM2 = r.body;
+    try {
     r = await json('POST', '/api/study/items', { plan_id: planM2.id, name: '乙方的项', start_date: '2031-03-01', end_date: '2031-03-10' });
+    assert(r.status === 200 && r.body.id > 0, '学习成员：给第二位的计划建学习项');
     const itM2 = r.body;
+    r = await json('POST', '/api/study/items', { plan_id: planM2.id, name: '乙方更早的项', start_date: '2031-02-20', end_date: '2031-02-25' });
+    assert(r.status === 200 && r.body.id > 0, '学习成员：给第二位建一个开始日最早的项');
+    const itM2Early = r.body;
     r = await json('PUT', '/api/study/check', { item_id: itM2.id, date: '2031-03-03', checked: true });
+    assert(r.status === 200, '学习成员：给第二位的项勾选');
     r = await call('GET', `/api/study/day?date=2031-03-03&member=${m1.id}`);
     assert(!r.body.items.some(x => x.id === itM2.id), '学习成员：第一位的今天看不到第二位的项');
     r = await call('GET', `/api/study/day?date=2031-03-03&member=${m2.id}`);
     assert(r.body.items.some(x => x.id === itM2.id) && !r.body.items.some(x => x.id === it.id), '学习成员：第二位的今天只有自己的项');
-    r = await call('GET', `/api/study/day?date=2031-03-12&member=${m1.id}`);
-    assert(!r.body.upcoming.some(x => x.id === itM2.id), '学习成员：即将开始也只含自己的');
+    // 即将开始：2031-02-20 开始的项比所有人的都早，不会被 limit=3 截掉，所以反向断言真的能测出过滤
+    r = await call('GET', `/api/study/day?date=2031-02-15&member=${m2.id}`);
+    assert(r.body.upcoming.some(x => x.id === itM2Early.id), '学习成员：第二位的即将开始含自己的项');
+    r = await call('GET', `/api/study/day?date=2031-02-15&member=${m1.id}`);
+    assert(!r.body.upcoming.some(x => x.id === itM2Early.id), '学习成员：第一位的即将开始不含第二位的项');
     r = await call('GET', `/api/study/plans?member=${m1.id}`);
     assert(r.body.some(x => x.id === plan.id) && !r.body.some(x => x.id === planM2.id), '学习成员：计划列表按成员过滤');
     r = await call('GET', `/api/study/items?member=${m2.id}`);
@@ -353,7 +368,9 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(!r.body.items.some(x => x.id === itM2.id), '学习成员：转移后第二位看不到');
     r = await json('PUT', `/api/study/plans/${planM2.id}`, { name: '冒烟乙方计划', member_id: 999999, start_date: '2031-01-01', end_date: '2031-06-30' });
     assert(r.status === 400 && r.body.error === '成员不存在', '学习成员：转给不存在的成员被拒绝');
-    await call('DELETE', `/api/study/plans/${planM2.id}`);
+    } finally {
+      await call('DELETE', `/api/study/plans/${planM2.id}`);  // 中途断言失败也要清掉，避免残留
+    }
 
     r = await json('PUT', '/api/study/check', { item_id: true, date: '2031-03-03', checked: true });
     assert(r.status === 404, '学习计划：item_id 不是整数时不会误操作 id=1 的项');

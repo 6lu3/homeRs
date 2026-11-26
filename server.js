@@ -191,12 +191,17 @@ db.exec(`
   );
 `);
 // 学习计划的成员（固定两位，只能改名）；旧库的计划全部归第一位。重复启动不会改动已分配的计划（只处理 member_id = 0）
+// 注意：study_plans 的 member_id 列不在上面的 CREATE TABLE 里，新库和旧库都靠这里的 ALTER 补上
 if (!db.prepare('PRAGMA table_info(study_plans)').all().some(c => c.name === 'member_id')) {
   db.exec('ALTER TABLE study_plans ADD COLUMN member_id INTEGER NOT NULL DEFAULT 0');
 }
 if (!db.prepare('SELECT 1 FROM study_members LIMIT 1').get()) {
-  db.prepare('INSERT INTO study_members(name, sort) VALUES(?, ?)').run('我', 0);
-  db.prepare('INSERT INTO study_members(name, sort) VALUES(?, ?)').run('TA', 1);
+  db.exec('BEGIN');  // 两条预置放进一个事务，避免中途崩溃后只剩一位成员
+  try {
+    db.prepare('INSERT INTO study_members(name, sort) VALUES(?, ?)').run('我', 0);
+    db.prepare('INSERT INTO study_members(name, sort) VALUES(?, ?)').run('TA', 1);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 db.prepare('UPDATE study_plans SET member_id = (SELECT id FROM study_members ORDER BY sort, id LIMIT 1) WHERE member_id = 0').run();
 db.exec('CREATE INDEX IF NOT EXISTS idx_study_plans_member ON study_plans(member_id)');

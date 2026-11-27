@@ -389,6 +389,144 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     assert(r.status === 404, '学习计划：删除不存在的大计划返回 404');
   }
 
+  // 每周工作记录（用 2032 年的日期，避免撞到真实数据）。
+  // 不允许删除人员，所以这里复用一个名为「冒烟人员」的人员（没有才添加），建议只在临时数据目录上跑冒烟测试
+  {
+    const created = [];   // 本块创建的记录 id，结束时清理
+    try {
+      r = await call('GET', '/api/work/people');
+      assert(r.status === 200 && r.body.length >= 1, '每周工作：默认至少有一位人员');
+      const first = r.body[0];
+      let smoker = r.body.find(p => p.name === '冒烟人员');
+      r = await json('POST', '/api/work/people', { name: '   ' });
+      assert(r.status === 400 && r.body.error === '名称不能为空', '每周工作：添加人员空名被拒绝');
+      r = await json('POST', '/api/work/people', { name: 'x'.repeat(21) });
+      assert(r.status === 400 && r.body.error === '名称最长 20 字', '每周工作：添加人员超过 20 字被拒绝');
+      if (!smoker) {
+        r = await json('POST', '/api/work/people', { name: '冒烟人员' });
+        assert(r.status === 200 && r.body.name === '冒烟人员', '每周工作：添加人员');
+        smoker = r.body;
+      }
+      r = await json('PUT', `/api/work/people/${smoker.id}`, { name: '冒烟人员' });
+      assert(r.status === 200 && r.body.name === '冒烟人员', '每周工作：人员改名');
+      r = await json('PUT', '/api/work/people/999999', { name: '甲' });
+      assert(r.status === 404 && r.body.error === '人员不存在', '每周工作：改名不存在的人员返回 404');
+
+      const W = '2032-03-01';   // 周一
+      for (const q of ['', '&person=abc', '&person=999999', '&person=0']) {
+        r = await call('GET', `/api/work/week?start=${W}${q}`);
+        assert(r.status === 400 && r.body.error === '人员不存在', `每周工作：week 的 person 缺失或非法被拒绝（${q || '缺失'}）`);
+        r = await call('GET', `/api/work/report?start=${W}${q}`);
+        assert(r.status === 400 && r.body.error === '人员不存在', `每周工作：report 的 person 缺失或非法被拒绝（${q || '缺失'}）`);
+      }
+      r = await call('GET', `/api/work/week?start=2032-02-30&person=${first.id}`);
+      assert(r.status === 400, '每周工作：week 的 start 非法被拒绝');
+
+      // 新增
+      const E = { person_id: first.id, date: '2032-03-03', kind: 'done', text: '对接接口' };
+      r = await json('POST', '/api/work/entries', { ...E, kind: 'x' });
+      assert(r.status === 400 && r.body.error === '类型无效', '每周工作：非法类型被拒绝');
+      r = await json('POST', '/api/work/entries', { ...E, text: '   ' });
+      assert(r.status === 400 && r.body.error === '内容不能为空', '每周工作：空内容被拒绝');
+      r = await json('POST', '/api/work/entries', { ...E, text: 'x'.repeat(201) });
+      assert(r.status === 400 && r.body.error === '内容最长 200 字', '每周工作：超长内容被拒绝');
+      r = await json('POST', '/api/work/entries', { ...E, date: '2032-02-30' });
+      assert(r.status === 400 && r.body.error === '日期格式应为 YYYY-MM-DD', '每周工作：非法日期被拒绝');
+      r = await json('POST', '/api/work/entries', { ...E, person_id: 999999 });
+      assert(r.status === 400 && r.body.error === '人员不存在', '每周工作：记录的人员不存在被拒绝');
+      r = await json('POST', '/api/work/entries', E);
+      assert(r.status === 200 && r.body.id > 0 && r.body.done === false, '每周工作：新增已做');
+      const e1 = r.body; created.push(e1.id);
+      r = await json('POST', '/api/work/entries', { ...E, kind: 'todo', text: '写方案', date: '2032-03-04' });
+      const e2 = r.body; created.push(e2.id);
+      r = await json('POST', '/api/work/entries', { ...E, kind: 'todo', text: '评审方案', date: '2032-03-05' });
+      const e3 = r.body; created.push(e3.id);
+      r = await json('POST', '/api/work/entries', { ...E, kind: 'todo', text: '下周的事', date: '2032-03-09' });
+      const e4 = r.body; created.push(e4.id);
+      r = await call('GET', `/api/work/week?start=2032-03-03&person=${first.id}`);   // start 不是周一，自动归一
+      assert(r.status === 200 && r.body.start === W && r.body.end === '2032-03-07' && r.body.days.length === 7, '每周工作：week 归一到周一并返回 7 天');
+      assert(r.body.days[2].date === '2032-03-03' && r.body.days[2].entries.some(x => x.id === e1.id && x.text === '对接接口'), '每周工作：记录归在正确的日子');
+      assert(!r.body.days.some(d => d.entries.some(x => x.id === e4.id)), '每周工作：下一周的记录不在本周');
+
+      // 修改
+      r = await json('PUT', `/api/work/entries/${e2.id}`, { done: true });
+      assert(r.status === 200 && r.body.done === true, '每周工作：勾选待办');
+      r = await json('PUT', `/api/work/entries/${e2.id}`, { done: 'true' });
+      assert(r.status === 400, '每周工作：done 不是布尔值被拒绝');
+      r = await json('PUT', `/api/work/entries/${e1.id}`, { text: '对接接口（改）' });
+      assert(r.status === 200 && r.body.text === '对接接口（改）', '每周工作：修改文字');
+      r = await json('PUT', `/api/work/entries/${e1.id}`, { date: '2032-03-10' });
+      assert(r.status === 200 && r.body.date === '2032-03-10', '每周工作：修改日期');
+      r = await call('GET', `/api/work/week?start=${W}&person=${first.id}`);
+      assert(!r.body.days.some(d => d.entries.some(x => x.id === e1.id)), '每周工作：改了日期后从旧周消失');
+      r = await call('GET', '/api/work/week?start=2032-03-08&person=' + first.id);
+      assert(r.body.days[2].entries.some(x => x.id === e1.id), '每周工作：改了日期后出现在新周');
+      r = await json('PUT', `/api/work/entries/${e1.id}`, { date: '2032-03-03' });
+      r = await json('PUT', `/api/work/entries/${e2.id}`, { kind: 'done' });
+      assert(r.status === 200 && r.body.kind === 'done' && r.body.done === false, '每周工作：改成已做类型后 done 被重置');
+      r = await json('PUT', `/api/work/entries/${e2.id}`, { kind: 'todo' });
+      r = await json('PUT', `/api/work/entries/${e2.id}`, { done: true });
+      r = await json('PUT', '/api/work/entries/999999', { text: 'x' });
+      assert(r.status === 404 && r.body.error === '记录不存在', '每周工作：修改不存在的记录返回 404');
+      r = await json('PUT', `/api/work/entries/${e1.id}`, { kind: 'bad' });
+      assert(r.status === 400 && r.body.error === '类型无效', '每周工作：修改成非法类型被拒绝');
+
+      // 批量与撤销
+      r = await json('POST', '/api/work/entries/batch', { person_id: first.id, date: '2032-03-02', kind: 'done', text: '修了bug。开了周会' });
+      assert(r.status === 200 && r.body.count === 2 && r.body.ids.length === 2 && r.body.truncated === false, '每周工作：批量记录拆成两条');
+      const batchIds = r.body.ids; created.push(...batchIds);
+      r = await json('POST', '/api/work/entries/batch', { person_id: first.id, date: '2032-03-02', kind: 'done', text: '1。2。3。4。5。6。7' });
+      assert(r.status === 200 && r.body.count === 5 && r.body.truncated === true, '每周工作：超过 5 句只记前 5 条并标记 truncated');
+      const batch2 = r.body.ids; created.push(...batch2);
+      r = await json('POST', '/api/work/entries/batch', { person_id: first.id, date: '2032-03-02', kind: 'done', text: '。。' });
+      assert(r.status === 400 && r.body.error === '没有可记录的内容', '每周工作：拆不出内容被拒绝');
+      r = await call('GET', `/api/work/week?start=${W}&person=${first.id}`);
+      const before = r.body.days[1].entries.length;
+      r = await json('POST', '/api/work/entries/batch', { person_id: first.id, date: '2032-03-02', kind: 'done', text: '正常的一条。' + 'x'.repeat(201) });
+      assert(r.status === 400 && r.body.error === '内容最长 200 字', '每周工作：批量里有超长内容被拒绝');
+      r = await call('GET', `/api/work/week?start=${W}&person=${first.id}`);
+      assert(r.body.days[1].entries.length === before, '每周工作：批量失败时整批都没有写入');
+      r = await json('POST', '/api/work/entries/delete', { ids: batch2 });
+      assert(r.status === 200 && r.body.removed === 5, '每周工作：批量删除（撤销）');
+      r = await json('POST', '/api/work/entries/delete', { ids: Array.from({ length: 21 }, (_, i) => i + 1) });
+      assert(r.status === 400, '每周工作：一次删除超过 20 个 id 被拒绝');
+      r = await json('POST', '/api/work/entries/delete', { ids: 'abc' });
+      assert(r.status === 400, '每周工作：ids 不是数组被拒绝');
+      r = await call('GET', `/api/work/week?start=${W}&person=${first.id}`);
+      assert(batchIds.every(id => r.body.days[1].entries.some(x => x.id === id)), '每周工作：撤销只删了指定的那一批');
+
+      // 人员隔离
+      r = await json('POST', '/api/work/entries', { person_id: smoker.id, date: '2032-03-03', kind: 'done', text: '冒烟人员的一条' });
+      const es = r.body; created.push(es.id);
+      r = await call('GET', `/api/work/week?start=${W}&person=${smoker.id}`);
+      assert(r.body.days[2].entries.some(x => x.id === es.id) && !r.body.days.some(d => d.entries.some(x => x.id === e1.id)), '每周工作：人员之间的周视图互相隔离');
+      r = await call('GET', `/api/work/report?start=${W}&person=${first.id}`);
+      assert(!r.body.text.includes('冒烟人员的一条'), '每周工作：周报不含别人的记录');
+
+      // 周报
+      r = await call('GET', `/api/work/report?start=${W}&person=${first.id}`);
+      assert(r.status === 200 && r.body.empty === false && r.body.text.startsWith('本周工作（3/1 – 3/7）'), '每周工作：周报标题');
+      assert(r.body.text.includes('- 对接接口（改）') && r.body.text.includes('- 写方案'), '每周工作：周报含已做和已勾选的待办');
+      const lines = r.body.text.split('\n'), idx = lines.indexOf('下周计划');
+      assert(idx > 0 && lines.slice(idx).includes('- 评审方案') && lines.slice(idx).includes('- 下周的事'), '每周工作：未完成待办和下周的待办在下周计划里');
+      assert(!lines.slice(idx).includes('- 写方案'), '每周工作：已完成的待办不在下周计划里');
+      r = await call('GET', `/api/work/report?start=2032-06-07&person=${first.id}`);
+      assert(r.status === 200 && r.body.empty === true && r.body.text === '', '每周工作：整周没有记录时周报为空');
+
+      // 删除
+      r = await call('DELETE', `/api/work/entries/${e3.id}`);
+      assert(r.status === 200, '每周工作：删除记录');
+      r = await call('DELETE', `/api/work/entries/${e3.id}`);
+      assert(r.status === 404, '每周工作：重复删除返回 404');
+      r = await json('PUT', `/api/work/entries/${e3.id}`, { text: 'x' });
+      assert(r.status === 404, '每周工作：修改已删除的记录返回 404');
+    } finally {
+      if (created.length) {
+        for (let i = 0; i < created.length; i += 20) await json('POST', '/api/work/entries/delete', { ids: created.slice(i, i + 20) });
+      }
+    }
+  }
+
   // 清理（只删本测试创建的数据）
   for (const i of (await call('GET', '/api/items')).body) if (['酸奶', '创可贴, 大号', '螺丝刀'].includes(i.name)) await call('DELETE', `/api/items/${i.id}?purge=1`);
   r = await json('DELETE', `/api/locations/${shelf.id}`);

@@ -206,6 +206,28 @@ if (!db.prepare('SELECT 1 FROM study_members LIMIT 1').get()) {
 db.prepare('UPDATE study_plans SET member_id = (SELECT id FROM study_members ORDER BY sort, id LIMIT 1) WHERE member_id = 0').run();
 db.exec('CREATE INDEX IF NOT EXISTS idx_study_plans_member ON study_plans(member_id)');
 
+// 每周工作记录：人员 → 记录（删人员级联删记录；本版本不提供删除人员）
+db.exec(`
+  CREATE TABLE IF NOT EXISTS work_people (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    sort INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE IF NOT EXISTS work_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id INTEGER NOT NULL REFERENCES work_people(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    kind TEXT NOT NULL,            -- done | todo
+    text TEXT NOT NULL,
+    done INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_work_entries_person_date ON work_entries(person_id, date);
+`);
+if (!db.prepare('SELECT 1 FROM work_people LIMIT 1').get()) {
+  db.prepare('INSERT INTO work_people(name, sort) VALUES(?, ?)').run('我', 0);
+}
+
 // 首次运行：预置常见位置，方便直接上手
 if (db.prepare('SELECT COUNT(*) AS n FROM locations').get().n === 0) {
   const ins = db.prepare('INSERT INTO locations(name, parent_id, sort) VALUES (?, ?, ?)');
@@ -1168,6 +1190,137 @@ route('GET', /^\/api\/dashboard$/, (req, res) => {
     shoppingExtra: db.prepare('SELECT COUNT(*) AS n FROM shopping_extra WHERE done = 0').get().n,
   };
   json(res, 200, { today, counts, expiring, low, recent, log });
+});
+
+// ---------- 每周工作记录（纯逻辑见 lib/work.js；长期记录，不自动清理） ----------
+const work = require('./lib/work');
+const WORK_KINDS = ['done', 'todo'];
+const WORK_MAX_PEOPLE = 10;
+function workDate(s) {
+  if (!study.isDate(s)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD');
+  return s;
+}
+function workKind(k) {
+  if (!WORK_KINDS.includes(k)) throw new HttpError(400, '类型无效');
+  return k;
+}
+function workText(t) {
+  const s = typeof t === 'string' ? t.trim() : '';
+  if (!s) throw new HttpError(400, '内容不能为空');
+  if ([...s].length > 200) throw new HttpError(400, '内容最长 200 字');
+  return s;
+}
+function workName(n) {
+  const s = typeof n === 'string' ? n.trim() : '';
+  if (!s) throw new HttpError(400, '名称不能为空');
+  if ([...s].length > 20) throw new HttpError(400, '名称最长 20 字');
+  return s;
+}
+// 人员 id：必须是存在的人员，否则 400（number 或纯数字字符串都接受）
+function workPersonId(v) {
+  const n = typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : v;
+  if (!Number.isInteger(n) || !db.prepare('SELECT 1 FROM work_people WHERE id = ?').get(n)) throw new HttpError(400, '人员不存在');
+  return n;
+}
+const workEntryRow = id => {
+  const r = db.prepare('SELECT id, person_id, date, kind, text, done FROM work_entries WHERE id = ?').get(id);
+  return r && { ...r, done: !!r.done };
+};
+const workWeekStart = s => { try { return menu.weekStart(s); } catch (e) { throw new HttpError(400, e.message); } };
+const workEntriesBetween = (person, from, to) =>
+  db.prepare('SELECT id, kind, text, done, date FROM work_entries WHERE person_id = ? AND date >= ? AND date <= ? ORDER BY date, id').all(person, from, to)
+    .map(r => ({ ...r, done: !!r.done }));
+
+route('GET', /^\/api\/work\/people$/, (req, res) => {
+  json(res, 200, db.prepare('SELECT id, name FROM work_people ORDER BY sort, id').all());
+});
+route('POST', /^\/api\/work\/people$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const name = workName(b.name);
+  if (db.prepare('SELECT COUNT(*) AS n FROM work_people').get().n >= WORK_MAX_PEOPLE) throw new HttpError(400, `人员最多 ${WORK_MAX_PEOPLE} 个`);
+  const sort = db.prepare('SELECT COALESCE(MAX(sort), -1) + 1 AS n FROM work_people').get().n;
+  const id = db.prepare('INSERT INTO work_people(name, sort) VALUES(?, ?)').run(name, sort).lastInsertRowid;
+  json(res, 200, { id: Number(id), name });
+});
+route('PUT', /^\/api\/work\/people\/(\d+)$/, async (req, res, [id]) => {
+  const b = (await readJson(req)) || {};
+  const name = workName(b.name);
+  if (!db.prepare('SELECT 1 FROM work_people WHERE id = ?').get(id)) throw new HttpError(404, '人员不存在');
+  db.prepare('UPDATE work_people SET name = ? WHERE id = ?').run(name, id);
+  json(res, 200, { id: Number(id), name });
+});
+
+route('GET', /^\/api\/work\/week$/, (req, res, _m, url) => {
+  const person = workPersonId(url.searchParams.get('person'));
+  const start = workWeekStart(url.searchParams.get('start'));
+  const end = menu.addDays(start, 6);
+  const rows = workEntriesBetween(person, start, end);
+  const days = Array.from({ length: 7 }, (_, i) => ({ date: menu.addDays(start, i), entries: [] }));
+  for (const r of rows) days.find(d => d.date === r.date).entries.push(r);
+  json(res, 200, { start, end, days });
+});
+route('POST', /^\/api\/work\/entries$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const person = workPersonId(b.person_id);
+  const date = workDate(b.date), kind = workKind(b.kind), text = workText(b.text);
+  const id = db.prepare('INSERT INTO work_entries(person_id, date, kind, text, done, created_at) VALUES(?, ?, ?, ?, 0, ?)').run(person, date, kind, text, new Date().toISOString()).lastInsertRowid;
+  json(res, 200, workEntryRow(id));
+});
+// 语音：一段口述文字拆成多条，整批一个事务
+route('POST', /^\/api\/work\/entries\/batch$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const person = workPersonId(b.person_id);
+  const date = workDate(b.date), kind = workKind(b.kind);
+  const { parts, truncated } = work.splitSpoken(typeof b.text === 'string' ? b.text : '', 5);
+  if (!parts.length) throw new HttpError(400, '没有可记录的内容');
+  const texts = parts.map(workText);   // 先全部校验，再开事务
+  const ids = [];
+  db.exec('BEGIN');
+  try {
+    const ins = db.prepare('INSERT INTO work_entries(person_id, date, kind, text, done, created_at) VALUES(?, ?, ?, ?, 0, ?)');
+    const now = new Date().toISOString();
+    for (const t of texts) ids.push(Number(ins.run(person, date, kind, t, now).lastInsertRowid));
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  json(res, 200, { ids, count: ids.length, truncated });
+});
+route('PUT', /^\/api\/work\/entries\/(\d+)$/, async (req, res, [id]) => {
+  const b = (await readJson(req)) || {};
+  const cur = workEntryRow(id);
+  if (!cur) throw new HttpError(404, '记录不存在');
+  const next = { ...cur };
+  if (b.text !== undefined) next.text = workText(b.text);
+  if (b.kind !== undefined) next.kind = workKind(b.kind);
+  if (b.date !== undefined) next.date = workDate(b.date);
+  if (b.done !== undefined) {
+    if (typeof b.done !== 'boolean') throw new HttpError(400, 'done 应为 true 或 false');
+    next.done = b.done;
+  }
+  if (next.kind === 'done') next.done = false;   // 「已做」类型没有完成与否，改成已做时重置
+  db.prepare('UPDATE work_entries SET text = ?, kind = ?, date = ?, done = ? WHERE id = ?').run(next.text, next.kind, next.date, next.done ? 1 : 0, id);
+  json(res, 200, workEntryRow(id));
+});
+route('DELETE', /^\/api\/work\/entries\/(\d+)$/, (req, res, [id]) => {
+  if (!workEntryRow(id)) throw new HttpError(404, '记录不存在');
+  db.prepare('DELETE FROM work_entries WHERE id = ?').run(id);
+  json(res, 200, { ok: true });
+});
+// 撤销一批：不存在的 id 忽略
+route('POST', /^\/api\/work\/entries\/delete$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  if (!Array.isArray(b.ids) || b.ids.length > 20 || !b.ids.every(Number.isInteger)) throw new HttpError(400, 'ids 无效');
+  let removed = 0;
+  const del = db.prepare('DELETE FROM work_entries WHERE id = ?');
+  for (const id of b.ids) removed += Number(del.run(id).changes);
+  json(res, 200, { removed });
+});
+route('GET', /^\/api\/work\/report$/, (req, res, _m, url) => {
+  const person = workPersonId(url.searchParams.get('person'));
+  const start = workWeekStart(url.searchParams.get('start'));
+  const entries = workEntriesBetween(person, start, menu.addDays(start, 6));
+  const nextWeekTodos = workEntriesBetween(person, menu.addDays(start, 7), menu.addDays(start, 13))
+    .filter(e => e.kind === 'todo' && !e.done).map(e => ({ date: e.date, text: e.text }));
+  json(res, 200, work.buildReport({ start, entries, nextWeekTodos }));
 });
 
 // ---------- 服务器 ----------

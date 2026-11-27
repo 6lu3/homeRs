@@ -525,6 +525,7 @@
     if (view === 'tools') $('#view-tools').classList.remove('hidden');
     if (view === 'menu') { $('#view-menu').classList.remove('hidden'); enterMenu(); }
     if (view === 'study') { $('#view-study').classList.remove('hidden'); enterStudy(); }
+    if (view === 'work') { $('#view-work').classList.remove('hidden'); enterWork(); }
   }
   // ---------- 每周菜单 ----------
   const MEAL_NAMES = { breakfast: '早', lunch: '午', dinner: '晚' };
@@ -1038,6 +1039,245 @@
       loadStudyPlans();
     } catch (err) { $('#se-err').textContent = err.message; }
     finally { study.saving = false; $('#se-save').disabled = false; }
+  });
+
+  // ---------- 每周工作 ----------
+  const work = { person: null, people: [], start: null, target: null, kind: 'done', week: null, weekSeq: 0, enterSeq: 0, editing: null, saving: false, adding: false };
+  // 选中的人员记在这台设备上；隐私模式下 localStorage 可能抛错，忽略即可
+  const savedPerson = () => { try { return Number(localStorage.getItem('work_person')); } catch { return 0; } };
+  const savePerson = id => { try { localStorage.setItem('work_person', String(id)); } catch { /* 忽略 */ } };
+  const personName = id => (work.people.find(p => p.id === id) || {}).name || '';
+  const nextMondayStr = s => addDaysStr(mondayOf(s), 7);   // 与 lib/work.js 的 nextMonday 一致
+  const findWorkEntry = id => work.week && work.week.days.flatMap(d => d.entries).find(e => e.id === id);
+
+  async function enterWork() {
+    const seq = ++work.enterSeq;
+    work.weekSeq++;   // 在途的旧请求全部作废
+    try {
+      const people = await api('/api/work/people');
+      if (seq !== work.enterSeq) return;
+      if (!people.length) throw new Error('没有可用的人员');
+      work.people = people;
+      // 本机记住的人员已不存在（或没记过）时，回退到第一位
+      work.person = (people.find(p => p.id === savedPerson()) || people[0]).id;
+    } catch (err) {
+      if (seq !== work.enterSeq) return;
+      toast(err.message);
+      work.person = null;
+      $('#wk-body').innerHTML = '';
+      $('#work-people').classList.remove('hidden');
+      $('#work-people').innerHTML = '<button type="button" class="btn small" id="work-retry">加载失败，点此重试</button>';
+      return;
+    }
+    renderWorkPeople();
+    loadWorkWeek(mondayOf(todayStr()));   // 每次进入都回到本周
+  }
+  // 只有两个人以上才显示切换条
+  function renderWorkPeople() {
+    const box = $('#work-people');
+    box.classList.toggle('hidden', work.people.length < 2);
+    box.innerHTML = work.people.map(p => `<button type="button" class="study-member${p.id === work.person ? ' active' : ''}" data-id="${p.id}">${esc(p.name)}</button>`).join('');
+  }
+  $('#work-people').addEventListener('click', e => {
+    if (e.target.closest('#work-retry')) { enterWork(); return; }
+    const b = e.target.closest('.study-member');
+    if (!b || Number(b.dataset.id) === work.person) return;
+    switchWorkPerson(Number(b.dataset.id));
+  });
+  function switchWorkPerson(id) {
+    work.person = id; savePerson(id);
+    work.weekSeq++; work.week = null;
+    $('#wk-body').innerHTML = '';   // 先清掉上一位的内容，再加载
+    renderWorkPeople();
+    loadWorkWeek(work.start || mondayOf(todayStr()), { keepTarget: true });
+  }
+
+  function renderWorkHead() {
+    const end = addDaysStr(work.start, 6);
+    $('#wk-label').innerHTML = `${esc(mdLabel(work.start))} – ${esc(mdLabel(end))}${work.start === mondayOf(todayStr()) ? ' <span class="badge menu-cur">本周</span>' : ''}`;
+    $('#wk-target').textContent = `记到：${dayLabel(work.target)}（点下面某一天的标题可以改）`;
+  }
+  async function loadWorkWeek(start, { keepTarget = false } = {}) {
+    const seq = ++work.weekSeq;
+    work.start = start;
+    const inWeek = d => d >= start && d <= addDaysStr(start, 6);
+    if (!keepTarget || !work.target || !inWeek(work.target)) work.target = inWeek(todayStr()) ? todayStr() : start;
+    renderWorkHead();
+    try {
+      const week = await api(`/api/work/week?start=${encodeURIComponent(start)}&person=${work.person}`);
+      if (seq !== work.weekSeq) return;   // 已有更新的请求，丢弃过期响应
+      work.week = week;
+      renderWorkWeek();
+    } catch (err) {
+      if (seq !== work.weekSeq) return;
+      work.week = null;
+      $('#wk-body').innerHTML = '<p class="muted sd-empty">加载失败，请翻页或点「本周」重试。</p>';   // 不留旧内容，免得和标题对不上
+      toast(err.message);
+    }
+  }
+  function workEntryHtml(e) {
+    const todo = e.kind === 'todo';
+    return `<div class="wk-entry${e.done ? ' done' : ''}">
+      ${todo ? `<button type="button" class="wk-check" data-act="check" data-id="${e.id}" aria-label="${e.done ? '取消完成' : '标记完成'}：${esc(e.text)}">${e.done ? '✓' : ''}</button>` : '<span class="wk-dot">·</span>'}
+      <button type="button" class="wk-txt" data-act="edit" data-id="${e.id}">${todo ? '<span class="badge">待办</span> ' : ''}${esc(e.text)}</button>
+      ${todo && !e.done ? `<button type="button" class="btn small" data-act="next" data-id="${e.id}">挪到下周</button>` : ''}
+    </div>`;
+  }
+  function renderWorkWeek() {
+    const today = todayStr();
+    $('#wk-body').innerHTML = work.week.days.map(d => `
+      <div class="wk-day${d.date === work.target ? ' target' : ''}${d.date === today ? ' today' : ''}">
+        <button type="button" class="wk-day-head" data-date="${esc(d.date)}">${WEEKDAYS[parseLocalDate(d.date).getDay()]} ${esc(mdLabel(d.date))}${d.date === today ? ' <span class="badge menu-cur">今天</span>' : ''}</button>
+        <div class="wk-list">${d.entries.map(workEntryHtml).join('') || '<div class="wk-empty">—</div>'}</div>
+      </div>`).join('');
+  }
+  $('#wk-prev').addEventListener('click', () => loadWorkWeek(addDaysStr(work.start, -7)));
+  $('#wk-next').addEventListener('click', () => loadWorkWeek(addDaysStr(work.start, 7)));
+  $('#wk-today').addEventListener('click', () => loadWorkWeek(mondayOf(todayStr())));
+  $('#work-back').addEventListener('click', () => switchView('tools'));
+
+  // 类型开关：已做 / 待办
+  $$('.wk-kind').forEach(b => b.addEventListener('click', () => {
+    work.kind = b.dataset.kind;
+    $$('.wk-kind').forEach(x => x.classList.toggle('active', x === b));
+  }));
+  // 打字记录
+  $('#wk-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('#wk-text').value.trim();
+    if (!text || work.person == null || work.adding) return;
+    work.adding = true;
+    try {
+      await postJson('/api/work/entries', { person_id: work.person, date: work.target, kind: work.kind, text });
+      $('#wk-text').value = '';
+      await loadWorkWeek(work.start, { keepTarget: true });
+    } catch (err) { toast(err.message); }
+    finally { work.adding = false; $('#wk-text').focus(); }
+  });
+  // 一段口述文字记成多条（语音录入调用），带「撤销」；出错时抛出，由调用方提示
+  async function addWorkEntries(text) {
+    if (work.person == null) throw new Error('人员还没有加载出来');
+    const r = await postJson('/api/work/entries/batch', { person_id: work.person, date: work.target, kind: work.kind, text });
+    await loadWorkWeek(work.start, { keepTarget: true });
+    toast(`已记录 ${r.count} 条${r.truncated ? '（只记了前 5 条，后面的没有记）' : ''}`, 7000, {
+      label: '撤销',
+      onClick: async () => {
+        try { await postJson('/api/work/entries/delete', { ids: r.ids }); toast('已撤销'); loadWorkWeek(work.start, { keepTarget: true }); }
+        catch (err) { toast(err.message); }
+      },
+    });
+  }
+  // 周内的点击：改目标日、勾选、挪到下周、编辑
+  $('#wk-body').addEventListener('click', async e => {
+    const head = e.target.closest('.wk-day-head');
+    if (head) { work.target = head.dataset.date; renderWorkHead(); renderWorkWeek(); return; }
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act, id = Number(el.dataset.id);
+    const entry = findWorkEntry(id);
+    if (!entry) { toast('这条记录已经不存在了'); loadWorkWeek(work.start, { keepTarget: true }); return; }
+    if (act === 'edit') { openWorkEditor(entry); return; }
+    if (el.disabled) return;
+    el.disabled = true;
+    try {
+      if (act === 'check') await postJson('/api/work/entries/' + id, { done: !entry.done }, 'PUT');
+      else if (act === 'next') { await postJson('/api/work/entries/' + id, { date: nextMondayStr(entry.date) }, 'PUT'); toast('已挪到下周一'); }
+      await loadWorkWeek(work.start, { keepTarget: true });
+    } catch (err) { toast(err.message); el.disabled = false; }
+  });
+
+  // 编辑一条记录
+  function openWorkEditor(entry) {
+    work.editing = entry.id; work.saving = false;
+    $('#we-text').value = entry.text; $('#we-date').value = entry.date; $('#we-kind').value = entry.kind;
+    $('#we-err').textContent = '';
+    $('#work-editor').classList.remove('hidden');
+  }
+  function closeWorkEditor() { if (work.saving) return; $('#work-editor').classList.add('hidden'); work.editing = null; }   // 保存中不允许关闭，避免重复提交
+  $('#we-cancel').addEventListener('click', closeWorkEditor);
+  $('#work-editor .sheet-backdrop').addEventListener('click', closeWorkEditor);
+  $('#we-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = work.editing;
+    if (id == null || work.saving) return;
+    const body = { text: $('#we-text').value.trim(), date: $('#we-date').value, kind: $('#we-kind').value };
+    if (!body.text) { $('#we-err').textContent = '内容不能为空'; return; }
+    if (!body.date) { $('#we-err').textContent = '请选择日期'; return; }
+    work.saving = true; $('#we-save').disabled = true;
+    try {
+      await postJson('/api/work/entries/' + id, body, 'PUT');
+      work.saving = false;
+      closeWorkEditor();
+      loadWorkWeek(work.start, { keepTarget: true });
+    } catch (err) { $('#we-err').textContent = err.message; }
+    finally { work.saving = false; $('#we-save').disabled = false; }
+  });
+  $('#we-del').addEventListener('click', async () => {
+    const id = work.editing;
+    if (id == null || work.saving) return;
+    if (!await askConfirm('删除这条记录？', { okText: '删除', danger: true })) return;
+    try {
+      await api('/api/work/entries/' + id, { method: 'DELETE' });
+      closeWorkEditor();
+      loadWorkWeek(work.start, { keepTarget: true });
+    } catch (err) { $('#we-err').textContent = err.message; }
+  });
+
+  // 周报
+  $('#wk-report-btn').addEventListener('click', async e => {
+    if (work.person == null) return;
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const r = await api(`/api/work/report?start=${encodeURIComponent(work.start)}&person=${work.person}`);
+      if (r.empty) { toast('这一周还没有记录'); return; }
+      $('#wr-text').value = r.text;   // 纯文本，用 value 赋值，不经 innerHTML
+      $('#work-report').classList.remove('hidden');
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; }
+  });
+  $('#wr-close').addEventListener('click', () => $('#work-report').classList.add('hidden'));
+  $('#work-report .sheet-backdrop').addEventListener('click', () => $('#work-report').classList.add('hidden'));
+  $('#wr-copy').addEventListener('click', async () => {
+    const ta = $('#wr-text');
+    try { await navigator.clipboard.writeText(ta.value); toast('已复制'); }
+    catch { ta.focus(); ta.select(); toast('已选中，请手动复制', 3000); }   // 剪贴板不可用（非 HTTPS、权限被拒）时的退路
+  });
+
+  // 人员
+  function renderWorkPeopleSheet() {
+    $('#wp-list').innerHTML = work.people.map(p => `<div class="wp-row"><span class="wp-name${p.id === work.person ? ' cur' : ''}">${esc(p.name)}</span><button type="button" class="btn small" data-act="rename" data-id="${p.id}">改名</button></div>`).join('');
+  }
+  $('#work-people-btn').addEventListener('click', () => {
+    if (work.person == null) { toast('人员还没有加载出来'); return; }
+    renderWorkPeopleSheet();
+    $('#work-people-sheet').classList.remove('hidden');
+  });
+  $('#wp-close').addEventListener('click', () => $('#work-people-sheet').classList.add('hidden'));
+  $('#work-people-sheet .sheet-backdrop').addEventListener('click', () => $('#work-people-sheet').classList.add('hidden'));
+  $('#wp-list').addEventListener('click', async e => {
+    const b = e.target.closest('[data-act="rename"]');
+    if (!b) return;
+    const id = Number(b.dataset.id);
+    if (!work.people.some(p => p.id === id)) return;
+    const r = await askText('给「' + personName(id) + '」改名', { value: personName(id), placeholder: '最长 20 字' });
+    if (r == null || r === '') return;
+    try {
+      const saved = await postJson('/api/work/people/' + id, { name: r }, 'PUT');
+      work.people = work.people.map(p => p.id === saved.id ? { ...p, name: saved.name } : p);   // 直接用返回值
+      renderWorkPeople(); renderWorkPeopleSheet();
+    } catch (err) { toast(err.message); }
+  });
+  $('#wp-add').addEventListener('click', async () => {
+    const r = await askText('新人员的名字', { placeholder: '最长 20 字' });
+    if (r == null || r === '') return;
+    try {
+      const p = await postJson('/api/work/people', { name: r });
+      work.people = [...work.people, p];
+      switchWorkPerson(p.id);   // 添加后直接切到新人员
+      renderWorkPeopleSheet();
+      toast(`已添加「${p.name}」`);
+    } catch (err) { toast(err.message); }
   });
 
   // ---------- 首页仪表盘 ----------

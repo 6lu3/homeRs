@@ -715,3 +715,39 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
   #view-study #sd-body .sd-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   #view-study > .study-tabs, #view-study > .study-members, #view-study > .study-pane { max-width: 960px; }
 }
+
+/* 每周工作 */
+.wk-target { margin: 0; padding: 0 14px 6px; color: var(--muted); font-size: 13px; }
+.wk-kinds { display: inline-flex; flex: none; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-btn); }
+.wk-kind { padding: 8px 10px; border: 0; background: var(--card); color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
+.wk-kind.active { background: var(--primary); color: #fff; }
+.wk-day { margin-bottom: 10px; overflow: hidden; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); }
+.wk-day.target { outline: 2px solid var(--primary); outline-offset: -2px; }
+.wk-day-head { display: block; width: 100%; padding: 9px 14px; border: 0; border-bottom: 1px solid var(--line); background: var(--field-bg); color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; }
+.wk-day.today .wk-day-head { color: var(--primary-dark); }
+.wk-list { padding: 4px 14px 8px; }
+.wk-empty { padding: 6px 0; color: var(--line); }
+.wk-entry { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.wk-entry + .wk-entry { border-top: 1px dashed var(--line); }
+.wk-dot { flex: none; width: 40px; text-align: center; color: var(--muted); }
+.wk-check { flex: none; width: 40px; height: 40px; border: 2px solid var(--line); border-radius: 50%; background: var(--card); color: #fff; font-size: 20px; line-height: 1; cursor: pointer; transition: all .2s ease; }
+.wk-check:hover { border-color: var(--primary); }
+.wk-entry.done .wk-check { border-color: var(--primary); background: var(--primary); }
+.wk-check:disabled { opacity: .5; cursor: wait; }
+.wk-txt { min-width: 0; flex: 1; padding: 8px 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 15px; line-height: 1.5; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.wk-entry.done .wk-txt { color: var(--muted); text-decoration: line-through; }
+.wk-entry .btn.small { flex: none; white-space: nowrap; }
+.wk-report-text { width: 100%; font: inherit; line-height: 1.6; }
+.wp-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.wp-name { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.wp-name.cur { color: var(--primary-dark); font-weight: 600; }
+.wp-row + .wp-row:last-child { border-bottom: 0; }
+#wp-add { margin-top: 12px; }
+@media (min-width: 720px) {
+  /* 每周工作：宽屏居中；这些块不再套用全局的左右缩进，统一对齐 */
+  #view-work > .menu-nav, #view-work > .wk-target, #view-work > #wk-form, #view-work > #work-people, #view-work > .pad { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; padding-right: 0; padding-left: 0; }
+  .wk-day-head { padding: 10px 18px; font-size: 14px; }
+  .wk-list { padding: 4px 18px 10px; }
+  .wk-txt { font-size: 16px; }
+  .wk-day-head:hover { background: var(--primary-soft); }
+}

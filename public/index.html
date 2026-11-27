@@ -69,7 +69,7 @@
     <input id="quick-text" placeholder="说一句话录入：买了两盒酸奶放冷藏" autocomplete="off" enterkeyhint="send" maxlength="200">
     <button type="button" id="receipt-btn" class="btn small hidden" title="拍小票录入" aria-label="拍小票录入"><svg class="ico" aria-hidden="true"><use href="#i-camera"></use></svg></button>
     <input type="file" id="receipt-file" accept="image/*" class="hidden">
-    <button type="button" id="asr-btn" class="btn small hidden" title="语音录入" aria-label="语音录入"><svg class="ico" aria-hidden="true"><use href="#i-mic"></use></svg><span class="asr-sec"></span></button>
+    <button type="button" id="asr-btn" class="btn small asr-btn hidden" data-asr="quick" title="语音录入" aria-label="语音录入"><svg class="ico" aria-hidden="true"><use href="#i-mic"></use></svg><span class="asr-sec"></span></button>
     <button type="submit" class="btn small primary">录入</button>
   </form>
   <p id="quick-hint" class="muted quick-hint">手机上点键盘的麦克风直接说；支持"把X放到Y""买了X放Y""X用完了""X还剩N个""保质期到12月1日"等说法。<span id="receipt-hint" class="hidden">也可以点相机拍小票。图片只发给识别服务，不会保存。</span><span id="asr-hint" class="hidden">也可以点页面里的麦克风说话，再点一下结束；可以一口气说几件事。录音只发给识别服务，不会保存。</span></p>
@@ -213,7 +213,7 @@
       <button type="button" class="wk-kind active" data-kind="done">已做</button>
       <button type="button" class="wk-kind" data-kind="todo">待办</button>
     </span>
-    <button type="button" id="wk-asr" class="btn small hidden" title="语音记录" aria-label="语音记录"><svg class="ico" aria-hidden="true"><use href="#i-mic"></use></svg><span class="asr-sec"></span></button>
+    <button type="button" id="wk-asr" class="btn small asr-btn hidden" data-asr="work" title="语音记录" aria-label="语音记录"><svg class="ico" aria-hidden="true"><use href="#i-mic"></use></svg><span class="asr-sec"></span></button>
     <button type="submit" class="btn small primary">记</button>
   </form>
   <div id="wk-body" class="pad"></div>

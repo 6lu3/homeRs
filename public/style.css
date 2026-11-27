@@ -190,12 +190,12 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .quick #receipt-btn { display: inline-flex; align-items: center; justify-content: center; padding: 9px 12px; }
 .quick #receipt-btn .ico { width: 18px; height: 18px; }
 .quick #receipt-btn:disabled { opacity: .5; cursor: wait; }
-.quick #asr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 9px 12px; }
-.quick #asr-btn .ico { width: 18px; height: 18px; }
-.quick #asr-btn .asr-sec { min-width: 2.2em; font-size: 12px; font-variant-numeric: tabular-nums; }
-.quick #asr-btn .asr-sec:empty { display: none; }
-.quick #asr-btn:disabled { opacity: .5; cursor: wait; }
-.quick #asr-btn.recording { border-color: var(--danger); background: var(--danger); color: #fff; animation: asrPulse 1.2s ease-in-out infinite; }
+.quick .btn.asr-btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 9px 12px; }
+.quick .btn.asr-btn .ico { width: 18px; height: 18px; }
+.quick .btn.asr-btn .asr-sec { min-width: 2.2em; font-size: 12px; font-variant-numeric: tabular-nums; }
+.quick .btn.asr-btn .asr-sec:empty { display: none; }
+.quick .btn.asr-btn:disabled { opacity: .5; cursor: wait; }
+.quick .btn.asr-btn.recording { border-color: var(--danger); background: var(--danger); color: #fff; animation: asrPulse 1.2s ease-in-out infinite; }
 @keyframes asrPulse { 50% { opacity: .72; } }
 #cf-list > .cf-notice { display: flex; align-items: center; gap: 5px; margin: 0 0 10px; color: var(--warn); font-size: 13px; line-height: 1.4; }
 .quick-hint { margin: 6px 16px 0; font-size: 12px; line-height: 1.5; color: var(--muted); }

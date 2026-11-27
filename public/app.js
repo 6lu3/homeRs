@@ -328,7 +328,8 @@
   // ---------- 语音录入 ----------
   // state：idle（空闲）/ starting（等待麦克风权限）/ recording（录音中）/ busy（识别中）
   // gen：每次放弃（切换页面、退出登录）加 1，等权限期间用户已经离开时，权限一到就丢掉，不再录音
-  const asr = { maxSeconds: 30, state: 'idle', gen: 0, stream: null, rec: null, timer: null, tick: null, started: 0 };
+  // target：这次录音是哪个按钮发起的（'quick' 物品页一句话录入 / 'work' 每周工作），识别结果交给对应的处理
+  const asr = { maxSeconds: 30, state: 'idle', gen: 0, target: null, stream: null, rec: null, timer: null, tick: null, started: 0 };
   async function loadAsrStatus() {
     let on = false;
     try {
@@ -337,22 +338,26 @@
       // 浏览器只在 HTTPS 页面允许录音；缺少录音或解码能力的浏览器不显示按钮
       on = !!s.enabled && window.isSecureContext && !!navigator.mediaDevices?.getUserMedia && !!window.MediaRecorder && !!(window.AudioContext || window.webkitAudioContext);
     } catch {}
-    $('#asr-btn').classList.toggle('hidden', !on);
+    $$('.asr-btn').forEach(b => b.classList.toggle('hidden', !on));
     $('#asr-hint').classList.toggle('hidden', !on);
   }
+  const asrIdleTitle = b => b.dataset.asr === 'work' ? '语音记录' : '语音录入';
   function asrUi(state) {
     asr.state = state;
-    const b = $('#asr-btn');
-    b.classList.toggle('recording', state === 'recording');
-    b.disabled = state === 'busy';
-    b.title = state === 'recording' ? '再点一下结束' : '语音录入';
-    b.setAttribute('aria-label', b.title);
+    if (state === 'idle') asr.target = null;
+    $$('.asr-btn').forEach(b => {
+      const owner = b.dataset.asr === asr.target;   // 只有发起这次录音的按钮显示录音态
+      b.classList.toggle('recording', state === 'recording' && owner);
+      b.disabled = state === 'busy' || (state === 'recording' && !owner);   // 识别中都不可点；录音中另一处也不可点
+      b.title = state === 'recording' && owner ? '再点一下结束' : asrIdleTitle(b);
+      b.setAttribute('aria-label', b.title);
+    });
   }
   function asrCleanup() { // 释放麦克风、清掉计时器和提示，保证不留残留状态
     clearTimeout(asr.timer); clearInterval(asr.tick); asr.timer = asr.tick = null;
     if (asr.stream) { asr.stream.getTracks().forEach(t => t.stop()); asr.stream = null; }
     asr.rec = null;
-    $('#asr-btn .asr-sec').textContent = '';
+    $$('.asr-btn .asr-sec').forEach(s => { s.textContent = ''; });
   }
   function asrStop() { if (asr.rec && asr.rec.state === 'recording') asr.rec.stop(); }
   function asrAbort() { // 切换页面等情况：放弃这次录音
@@ -386,7 +391,8 @@
     catch { asrCleanup(); toast('这个浏览器暂时不支持语音录入', 4000); return; }
     asr.started = Date.now();
     asrUi('recording');
-    asr.tick = setInterval(() => { $('#asr-btn .asr-sec').textContent = Math.floor((Date.now() - asr.started) / 1000) + 's'; }, 250);
+    const secEl = $(`.asr-btn[data-asr="${asr.target}"] .asr-sec`);   // 秒数只显示在发起录音的按钮上
+    asr.tick = setInterval(() => { if (secEl) secEl.textContent = Math.floor((Date.now() - asr.started) / 1000) + 's'; }, 250);
     asr.timer = setTimeout(asrStop, asr.maxSeconds * 1000);
   }
   // 录音 → 解码 → 各声道平均成单声道 → 16kHz 16 位 WAV（最多 maxSeconds 秒，保证不超过服务器的请求体上限）
@@ -403,6 +409,7 @@
     } finally { Promise.resolve().then(() => ctx.close()).catch(() => {}); }
   }
   async function asrFinish(mime, chunks) {
+    const target = asr.target;   // 识别期间 asr.target 不会变，这里先记下来，交付时按它分发
     const secs = (Date.now() - asr.started) / 1000;
     asrCleanup(); asrUi('busy');
     toast('识别中，请稍等…', 120000);
@@ -413,17 +420,23 @@
       $('#toast').classList.add('hidden');
       const text = String(r.text || '').trim().slice(0, 200);
       if (!text) { toast('没听清，再说一遍试试'); return; }
-      $('#quick-text').value = text; // 替换输入框里原有的内容，然后和点「录入」一样解析并弹出确认卡
-      await runQuick(text, r.truncated ? '这段话太长，后面的没有录入，请分开说。' : '');
+      if (target === 'work') {
+        // 每周工作：直接记到目标日（可撤销），不碰物品页的输入框
+        await addWorkEntries(text, r.truncated ? '（录音太长，后面的没有识别）' : '');
+      } else {
+        $('#quick-text').value = text; // 替换输入框里原有的内容，然后和点「录入」一样解析并弹出确认卡
+        await runQuick(text, r.truncated ? '这段话太长，后面的没有录入，请分开说。' : '');
+      }
     } catch (err) { toast(err.message, 4000); }
     finally { asrUi('idle'); }
   }
-  $('#asr-btn').addEventListener('click', () => {
+  $$('.asr-btn').forEach(btn => btn.addEventListener('click', () => {
     if (asr.state === 'idle') {
+      asr.target = btn.dataset.asr;   // 记下是谁发起的，识别结果交给它
       asr.state = 'starting'; // 等待权限弹窗期间忽略再次点击
       asrStart().finally(() => { if (asr.state === 'starting') asrUi('idle'); });
-    } else if (asr.state === 'recording') asrStop();
-  });
+    } else if (asr.state === 'recording' && asr.target === btn.dataset.asr) asrStop();
+  }));
   function locationOptions(sel, create) {
     let html = '<option value="">（不设置位置）</option>';
     if (create) html += `<option value="new:${esc(create.path)}" ${sel === 'new' ? 'selected' : ''}>新建：${esc(create.path)}</option>`;
@@ -516,7 +529,8 @@
     if (!main) $('#empty').classList.add('hidden'); else $('#empty').classList.toggle('hidden', state.items.length > 0);
     hideSubviews();
     hidePinPop();
-    if (view !== 'items') asrAbort(); // 离开物品页时放弃进行中的录音
+    // 离开发起录音的那个页面就放弃这次录音（物品页的录音只在物品页有效，每周工作页同理）
+    if (!((view === 'items' && asr.target === 'quick') || (view === 'work' && asr.target === 'work'))) asrAbort();
     if (view === 'locations') { $('#view-locations').classList.remove('hidden'); renderLocations(); }
     if (view === 'plans') { $('#view-plans').classList.remove('hidden'); enterPlans(); }
     if (view === 'settings') $('#view-settings').classList.remove('hidden');
@@ -1155,11 +1169,11 @@
     finally { work.adding = false; $('#wk-text').focus(); }
   });
   // 一段口述文字记成多条（语音录入调用），带「撤销」；出错时抛出，由调用方提示
-  async function addWorkEntries(text) {
+  async function addWorkEntries(text, note = '') {
     if (work.person == null) throw new Error('人员还没有加载出来');
     const r = await postJson('/api/work/entries/batch', { person_id: work.person, date: work.target, kind: work.kind, text });
     await loadWorkWeek(work.start, { keepTarget: true });
-    toast(`已记录 ${r.count} 条${r.truncated ? '（只记了前 5 条，后面的没有记）' : ''}`, 7000, {
+    toast(`已记录 ${r.count} 条${r.truncated ? '（只记了前 5 条，后面的没有记）' : ''}${note}`, 7000, {
       label: '撤销',
       onClick: async () => {
         try { await postJson('/api/work/entries/delete', { ids: r.ids }); toast('已撤销'); loadWorkWeek(work.start, { keepTarget: true }); }

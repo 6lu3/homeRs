@@ -206,27 +206,9 @@ if (!db.prepare('SELECT 1 FROM study_members LIMIT 1').get()) {
 db.prepare('UPDATE study_plans SET member_id = (SELECT id FROM study_members ORDER BY sort, id LIMIT 1) WHERE member_id = 0').run();
 db.exec('CREATE INDEX IF NOT EXISTS idx_study_plans_member ON study_plans(member_id)');
 
-// 每周工作记录：人员 → 记录（删人员级联删记录；本版本不提供删除人员）
-db.exec(`
-  CREATE TABLE IF NOT EXISTS work_people (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    sort INTEGER NOT NULL DEFAULT 0
-  );
-  CREATE TABLE IF NOT EXISTS work_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    person_id INTEGER NOT NULL REFERENCES work_people(id) ON DELETE CASCADE,
-    date TEXT NOT NULL,
-    kind TEXT NOT NULL,            -- done | todo
-    text TEXT NOT NULL,
-    done INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_work_entries_person_date ON work_entries(person_id, date);
-`);
-if (!db.prepare('SELECT 1 FROM work_people LIMIT 1').get()) {
-  db.prepare('INSERT INTO work_people(name, sort) VALUES(?, ?)').run('我', 0);
-}
+// 每周工作：人员 → 记录（只有「已做」）和待办（单独一张表，可选日期）。建表、预置默认人员、旧待办迁移都在 lib/work-db.js
+// 删人员会级联删记录和待办；本版本不提供删除人员
+require('./lib/work-db').initWorkSchema(db);
 
 // 首次运行：预置常见位置，方便直接上手
 if (db.prepare('SELECT COUNT(*) AS n FROM locations').get().n === 0) {
@@ -1194,15 +1176,15 @@ route('GET', /^\/api\/dashboard$/, (req, res) => {
 
 // ---------- 每周工作记录（纯逻辑见 lib/work.js；长期记录，不自动清理） ----------
 const work = require('./lib/work');
-const WORK_KINDS = ['done', 'todo'];
 const WORK_MAX_PEOPLE = 10;
 function workDate(s) {
   if (!study.isDate(s)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD');
   return s;
 }
+// 记录现在只有「已做」。kind 可以不传（默认 done）；传了就必须是 done——旧页面误传 todo 会得到明确的错误，而不是悄悄写成记录
 function workKind(k) {
-  if (!WORK_KINDS.includes(k)) throw new HttpError(400, '类型无效');
-  return k;
+  if (k === undefined || k === 'done') return 'done';
+  throw new HttpError(400, '类型无效');
 }
 function workText(t) {
   const s = typeof t === 'string' ? t.trim() : '';
@@ -1222,14 +1204,20 @@ function workPersonId(v) {
   if (!Number.isInteger(n) || !db.prepare('SELECT 1 FROM work_people WHERE id = ?').get(n)) throw new HttpError(400, '人员不存在');
   return n;
 }
-const workEntryRow = id => {
-  const r = db.prepare('SELECT id, person_id, date, kind, text, done FROM work_entries WHERE id = ?').get(id);
-  return r && { ...r, done: !!r.done };
-};
+const workEntryRow = id => db.prepare('SELECT id, person_id, date, text FROM work_entries WHERE id = ?').get(id);
 const workWeekStart = s => { try { return menu.weekStart(s); } catch (e) { throw new HttpError(400, e.message); } };
 const workEntriesBetween = (person, from, to) =>
-  db.prepare('SELECT id, kind, text, done, date FROM work_entries WHERE person_id = ? AND date >= ? AND date <= ? ORDER BY date, id').all(person, from, to)
-    .map(r => ({ ...r, done: !!r.done }));
+  db.prepare('SELECT id, date, text FROM work_entries WHERE person_id = ? AND date >= ? AND date <= ? ORDER BY date, id').all(person, from, to);
+// 待办：due_date 空串 = 没选日期；done_date 未完成时恒为空串
+function workDueDate(v) {
+  if (v === undefined || v === '') return '';
+  return workDate(v);
+}
+const workTodoRow = id => {
+  const r = db.prepare('SELECT id, person_id, text, due_date, done, done_date FROM work_todos WHERE id = ?').get(id);
+  return r && { ...r, done: !!r.done };
+};
+const WORK_DONE_LIMIT = 200;   // 「已完成」视图最多显示最近这么多条
 
 route('GET', /^\/api\/work\/people$/, (req, res) => {
   json(res, 200, db.prepare('SELECT id, name FROM work_people ORDER BY sort, id').all());
@@ -1290,14 +1278,9 @@ route('PUT', /^\/api\/work\/entries\/(\d+)$/, async (req, res, [id]) => {
   if (!cur) throw new HttpError(404, '记录不存在');
   const next = { ...cur };
   if (b.text !== undefined) next.text = workText(b.text);
-  if (b.kind !== undefined) next.kind = workKind(b.kind);
+  workKind(b.kind);   // 只校验：传了就必须是 done
   if (b.date !== undefined) next.date = workDate(b.date);
-  if (b.done !== undefined) {
-    if (typeof b.done !== 'boolean') throw new HttpError(400, 'done 应为 true 或 false');
-    next.done = b.done;
-  }
-  if (next.kind === 'done') next.done = false;   // 「已做」类型没有完成与否，改成已做时重置
-  db.prepare('UPDATE work_entries SET text = ?, kind = ?, date = ?, done = ? WHERE id = ?').run(next.text, next.kind, next.date, next.done ? 1 : 0, id);
+  db.prepare('UPDATE work_entries SET text = ?, date = ? WHERE id = ?').run(next.text, next.date, id);
   json(res, 200, workEntryRow(id));
 });
 route('DELETE', /^\/api\/work\/entries\/(\d+)$/, (req, res, [id]) => {
@@ -1314,13 +1297,65 @@ route('POST', /^\/api\/work\/entries\/delete$/, async (req, res) => {
   for (const id of b.ids) removed += Number(del.run(id).changes);
   json(res, 200, { removed });
 });
+// 待办（单独的清单）：可选日期，可勾选，「还没做」「已完成」「全部」三个视图
+route('GET', /^\/api\/work\/todos$/, (req, res, _m, url) => {
+  const person = workPersonId(url.searchParams.get('person'));
+  const filter = url.searchParams.get('filter') ?? 'open';
+  if (!['open', 'done', 'all'].includes(filter)) throw new HttpError(400, 'filter 无效');
+  const cols = 'id, text, due_date, done, done_date';
+  const fix = r => ({ ...r, done: !!r.done });
+  // 没完成的：有日期的按日期升序（同日按 id），没日期的排在后面（按 id）
+  const open = () => db.prepare(`SELECT ${cols} FROM work_todos WHERE person_id = ? AND done = 0 ORDER BY (due_date = ''), due_date, id`).all(person).map(fix);
+  // 已完成的：按完成日期倒序，最多 WORK_DONE_LIMIT 条
+  const done = () => db.prepare(`SELECT ${cols} FROM work_todos WHERE person_id = ? AND done = 1 ORDER BY done_date DESC, id DESC LIMIT ?`).all(person, WORK_DONE_LIMIT).map(fix);
+  json(res, 200, filter === 'open' ? open() : filter === 'done' ? done() : [...open(), ...done()]);
+});
+route('POST', /^\/api\/work\/todos$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const person = workPersonId(b.person_id);
+  const text = workText(b.text), due = workDueDate(b.due_date);
+  // done / done_date 只用于「撤销删除」时原样恢复；done_date 缺省取服务器日期，未完成时强制清空
+  const done = b.done === true;
+  const doneDate = done ? (b.done_date === undefined || b.done_date === '' ? localDate() : workDate(b.done_date)) : '';
+  const id = db.prepare('INSERT INTO work_todos(person_id, text, due_date, done, done_date, created_at) VALUES(?, ?, ?, ?, ?, ?)')
+    .run(person, text, due, done ? 1 : 0, doneDate, new Date().toISOString()).lastInsertRowid;
+  json(res, 200, workTodoRow(id));
+});
+route('PUT', /^\/api\/work\/todos\/(\d+)$/, async (req, res, [id]) => {
+  const b = (await readJson(req)) || {};
+  const cur = workTodoRow(id);
+  if (!cur) throw new HttpError(404, '待办不存在');
+  const next = { ...cur };
+  if (b.text !== undefined) next.text = workText(b.text);
+  if (b.due_date !== undefined) next.due_date = workDueDate(b.due_date);   // 传空串 = 清除日期；不传 = 不变
+  if (b.done !== undefined) {
+    if (typeof b.done !== 'boolean') throw new HttpError(400, 'done 应为 true 或 false');
+    if (b.done) {
+      // 勾选：给了 done_date 就用它；已经是完成状态则保持原完成日期；否则取服务器日期
+      next.done_date = b.done_date !== undefined ? workDate(b.done_date) : (cur.done ? cur.done_date : localDate());
+    } else {
+      next.done_date = '';
+    }
+    next.done = b.done;
+  }
+  db.prepare('UPDATE work_todos SET text = ?, due_date = ?, done = ?, done_date = ? WHERE id = ?').run(next.text, next.due_date, next.done ? 1 : 0, next.done_date, id);
+  json(res, 200, workTodoRow(id));
+});
+route('DELETE', /^\/api\/work\/todos\/(\d+)$/, (req, res, [id]) => {
+  if (!workTodoRow(id)) throw new HttpError(404, '待办不存在');
+  db.prepare('DELETE FROM work_todos WHERE id = ?').run(id);
+  json(res, 200, { ok: true });
+});
+
+// 周报：做了什么 = 本周的记录 + 本周完成的待办（按完成日期）；下周计划 = 全部没做完的待办
 route('GET', /^\/api\/work\/report$/, (req, res, _m, url) => {
   const person = workPersonId(url.searchParams.get('person'));
   const start = workWeekStart(url.searchParams.get('start'));
-  const entries = workEntriesBetween(person, start, menu.addDays(start, 6));
-  const nextWeekTodos = workEntriesBetween(person, menu.addDays(start, 7), menu.addDays(start, 13))
-    .filter(e => e.kind === 'todo' && !e.done).map(e => ({ date: e.date, text: e.text }));
-  json(res, 200, work.buildReport({ start, entries, nextWeekTodos }));
+  const end = menu.addDays(start, 6);
+  const entries = workEntriesBetween(person, start, end).map(e => ({ date: e.date, text: e.text }));
+  const doneTodos = db.prepare('SELECT done_date AS date, text FROM work_todos WHERE person_id = ? AND done = 1 AND done_date >= ? AND done_date <= ? ORDER BY done_date, id').all(person, start, end).map(r => ({ date: r.date, text: r.text }));
+  const openTodos = db.prepare('SELECT due_date, text FROM work_todos WHERE person_id = ? AND done = 0 ORDER BY id').all(person).map(r => ({ due_date: r.due_date, text: r.text }));
+  json(res, 200, work.buildReport({ start, entries, doneTodos, openTodos }));
 });
 
 // ---------- 服务器 ----------

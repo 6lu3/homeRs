@@ -407,8 +407,12 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
         assert(r.status === 200 && r.body.name === '冒烟人员', '每周工作：添加人员');
         smoker = r.body;
       }
+      r = await json('PUT', `/api/work/people/${smoker.id}`, { name: '  冒烟人员改名  ' });
+      assert(r.status === 200 && r.body.name === '冒烟人员改名', '每周工作：人员改名并去掉首尾空白');
+      r = await call('GET', '/api/work/people');
+      assert(r.body.find(p => p.id === smoker.id).name === '冒烟人员改名', '每周工作：改名后列表更新');
       r = await json('PUT', `/api/work/people/${smoker.id}`, { name: '冒烟人员' });
-      assert(r.status === 200 && r.body.name === '冒烟人员', '每周工作：人员改名');
+      assert(r.status === 200 && r.body.name === '冒烟人员', '每周工作：人员名字改回');
       r = await json('PUT', '/api/work/people/999999', { name: '甲' });
       assert(r.status === 404 && r.body.error === '人员不存在', '每周工作：改名不存在的人员返回 404');
 
@@ -438,11 +442,11 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       assert(r.status === 200 && r.body.id > 0 && r.body.done === false, '每周工作：新增已做');
       const e1 = r.body; created.push(e1.id);
       r = await json('POST', '/api/work/entries', { ...E, kind: 'todo', text: '写方案', date: '2032-03-04' });
-      const e2 = r.body; created.push(e2.id);
+      assert(r.status === 200, "每周工作：新建待办 e2"); const e2 = r.body; created.push(e2.id);
       r = await json('POST', '/api/work/entries', { ...E, kind: 'todo', text: '评审方案', date: '2032-03-05' });
-      const e3 = r.body; created.push(e3.id);
+      assert(r.status === 200, "每周工作：新建待办 e3"); const e3 = r.body; created.push(e3.id);
       r = await json('POST', '/api/work/entries', { ...E, kind: 'todo', text: '下周的事', date: '2032-03-09' });
-      const e4 = r.body; created.push(e4.id);
+      assert(r.status === 200, "每周工作：新建待办 e4"); const e4 = r.body; created.push(e4.id);
       r = await call('GET', `/api/work/week?start=2032-03-03&person=${first.id}`);   // start 不是周一，自动归一
       assert(r.status === 200 && r.body.start === W && r.body.end === '2032-03-07' && r.body.days.length === 7, '每周工作：week 归一到周一并返回 7 天');
       assert(r.body.days[2].date === '2032-03-03' && r.body.days[2].entries.some(x => x.id === e1.id && x.text === '对接接口'), '每周工作：记录归在正确的日子');
@@ -488,7 +492,7 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       assert(r.body.days[1].entries.length === before, '每周工作：批量失败时整批都没有写入');
       r = await json('POST', '/api/work/entries/delete', { ids: batch2 });
       assert(r.status === 200 && r.body.removed === 5, '每周工作：批量删除（撤销）');
-      r = await json('POST', '/api/work/entries/delete', { ids: Array.from({ length: 21 }, (_, i) => i + 1) });
+      r = await json('POST', '/api/work/entries/delete', { ids: Array.from({ length: 21 }, (_, i) => 2000000000 + i) });
       assert(r.status === 400, '每周工作：一次删除超过 20 个 id 被拒绝');
       r = await json('POST', '/api/work/entries/delete', { ids: 'abc' });
       assert(r.status === 400, '每周工作：ids 不是数组被拒绝');
@@ -497,7 +501,7 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
 
       // 人员隔离
       r = await json('POST', '/api/work/entries', { person_id: smoker.id, date: '2032-03-03', kind: 'done', text: '冒烟人员的一条' });
-      const es = r.body; created.push(es.id);
+      assert(r.status === 200, "每周工作：给冒烟人员建记录"); const es = r.body; created.push(es.id);
       r = await call('GET', `/api/work/week?start=${W}&person=${smoker.id}`);
       assert(r.body.days[2].entries.some(x => x.id === es.id) && !r.body.days.some(d => d.entries.some(x => x.id === e1.id)), '每周工作：人员之间的周视图互相隔离');
       r = await call('GET', `/api/work/report?start=${W}&person=${first.id}`);
@@ -521,8 +525,9 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       r = await json('PUT', `/api/work/entries/${e3.id}`, { text: 'x' });
       assert(r.status === 404, '每周工作：修改已删除的记录返回 404');
     } finally {
+      // 「最多 10 个人员」有意不在冒烟里测：人员不能删除，测了会在真实库里留下 10 个人，由人工验收覆盖
       if (created.length) {
-        for (let i = 0; i < created.length; i += 20) await json('POST', '/api/work/entries/delete', { ids: created.slice(i, i + 20) });
+        for (let i = 0; i < created.length; i += 20) await json('POST', '/api/work/entries/delete', { ids: created.slice(i, i + 20).filter(Number.isInteger) });
       }
     }
   }

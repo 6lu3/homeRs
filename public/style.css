@@ -741,7 +741,7 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .wp-row { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .wp-name { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .wp-name.cur { color: var(--primary-dark); font-weight: 600; }
-.wp-row + .wp-row:last-child { border-bottom: 0; }
+.wp-row:last-child { border-bottom: 0; }
 #wp-add { margin-top: 12px; }
 @media (min-width: 720px) {
   /* 每周工作：宽屏居中；这些块不再套用全局的左右缩进，统一对齐 */

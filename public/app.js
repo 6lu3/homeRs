@@ -329,7 +329,7 @@
   // state：idle（空闲）/ starting（等待麦克风权限）/ recording（录音中）/ busy（识别中）
   // gen：每次放弃（切换页面、退出登录）加 1，等权限期间用户已经离开时，权限一到就丢掉，不再录音
   // target：这次录音是哪个按钮发起的（'quick' 物品页一句话录入 / 'work' 每周工作），识别结果交给对应的处理
-  const asr = { maxSeconds: 30, state: 'idle', gen: 0, target: null, stream: null, rec: null, timer: null, tick: null, started: 0 };
+  const asr = { maxSeconds: 30, state: 'idle', gen: 0, target: null, snap: null, stream: null, rec: null, timer: null, tick: null, started: 0 };
   async function loadAsrStatus() {
     let on = false;
     try {
@@ -344,7 +344,7 @@
   const asrIdleTitle = b => b.dataset.asr === 'work' ? '语音记录' : '语音录入';
   function asrUi(state) {
     asr.state = state;
-    if (state === 'idle') asr.target = null;
+    if (state === 'idle') { asr.target = null; asr.snap = null; }
     $$('.asr-btn').forEach(b => {
       const owner = b.dataset.asr === asr.target;   // 只有发起这次录音的按钮显示录音态
       b.classList.toggle('recording', state === 'recording' && owner);
@@ -409,7 +409,7 @@
     } finally { Promise.resolve().then(() => ctx.close()).catch(() => {}); }
   }
   async function asrFinish(mime, chunks) {
-    const target = asr.target;   // 识别期间 asr.target 不会变，这里先记下来，交付时按它分发
+    const target = asr.target, snap = asr.snap;   // 识别期间不会变，这里先记下来，交付时按它分发
     const secs = (Date.now() - asr.started) / 1000;
     asrCleanup(); asrUi('busy');
     toast('识别中，请稍等…', 120000);
@@ -422,7 +422,7 @@
       if (!text) { toast('没听清，再说一遍试试'); return; }
       if (target === 'work') {
         // 每周工作：直接记到目标日（可撤销），不碰物品页的输入框
-        await addWorkEntries(text, r.truncated ? '（录音太长，后面的没有识别）' : '');
+        await addWorkEntries(text, r.truncated ? '（录音太长，后面的没有识别）' : '', snap);
       } else {
         $('#quick-text').value = text; // 替换输入框里原有的内容，然后和点「录入」一样解析并弹出确认卡
         await runQuick(text, r.truncated ? '这段话太长，后面的没有录入，请分开说。' : '');
@@ -433,6 +433,7 @@
   $$('.asr-btn').forEach(btn => btn.addEventListener('click', () => {
     if (asr.state === 'idle') {
       asr.target = btn.dataset.asr;   // 记下是谁发起的，识别结果交给它
+      asr.snap = asr.target === 'work' ? { person: work.person, date: work.target, kind: work.kind } : null;   // 每周工作：记下此刻选好的人员、日期、类型
       asr.state = 'starting'; // 等待权限弹窗期间忽略再次点击
       asrStart().finally(() => { if (asr.state === 'starting') asrUi('idle'); });
     } else if (asr.state === 'recording' && asr.target === btn.dataset.asr) asrStop();
@@ -1067,6 +1068,8 @@
   async function enterWork() {
     const seq = ++work.enterSeq;
     work.weekSeq++;   // 在途的旧请求全部作废
+    $('#wk-body').innerHTML = '';   // 先清掉上次离开时的内容，避免人员加载期间显示旧的一周还能点
+    work.week = null;
     try {
       const people = await api('/api/work/people');
       if (seq !== work.enterSeq) return;
@@ -1145,9 +1148,9 @@
         <div class="wk-list">${d.entries.map(workEntryHtml).join('') || '<div class="wk-empty">—</div>'}</div>
       </div>`).join('');
   }
-  $('#wk-prev').addEventListener('click', () => loadWorkWeek(addDaysStr(work.start, -7)));
-  $('#wk-next').addEventListener('click', () => loadWorkWeek(addDaysStr(work.start, 7)));
-  $('#wk-today').addEventListener('click', () => loadWorkWeek(mondayOf(todayStr())));
+  $('#wk-prev').addEventListener('click', () => { if (work.person != null) loadWorkWeek(addDaysStr(work.start, -7)); });
+  $('#wk-next').addEventListener('click', () => { if (work.person != null) loadWorkWeek(addDaysStr(work.start, 7)); });
+  $('#wk-today').addEventListener('click', () => { if (work.person != null) loadWorkWeek(mondayOf(todayStr())); });
   $('#work-back').addEventListener('click', () => switchView('tools'));
 
   // 类型开关：已做 / 待办
@@ -1159,7 +1162,9 @@
   $('#wk-form').addEventListener('submit', async e => {
     e.preventDefault();
     const text = $('#wk-text').value.trim();
-    if (!text || work.person == null || work.adding) return;
+    if (!text) return;
+    if (work.person == null) { toast('人员还没有加载出来，请稍候或点上面的重试'); return; }
+    if (work.adding) return;
     work.adding = true;
     try {
       await postJson('/api/work/entries', { person_id: work.person, date: work.target, kind: work.kind, text });
@@ -1169,14 +1174,18 @@
     finally { work.adding = false; $('#wk-text').focus(); }
   });
   // 一段口述文字记成多条（语音录入调用），带「撤销」；出错时抛出，由调用方提示
-  async function addWorkEntries(text, note = '') {
-    if (work.person == null) throw new Error('人员还没有加载出来');
-    const r = await postJson('/api/work/entries/batch', { person_id: work.person, date: work.target, kind: work.kind, text });
-    await loadWorkWeek(work.start, { keepTarget: true });
-    toast(`已记录 ${r.count} 条${r.truncated ? '（只记了前 5 条，后面的没有记）' : ''}${note}`, 7000, {
+  // snap：点麦克风那一刻的 {person, date, kind}。录音和识别要几秒，期间用户可能切人员或翻周，结果仍记到当时选好的地方
+  async function addWorkEntries(text, note = '', snap = null) {
+    const person = snap ? snap.person : work.person;
+    if (person == null) throw new Error('人员还没有加载出来');
+    const date = snap ? snap.date : work.target, kind = snap ? snap.kind : work.kind;
+    const r = await postJson('/api/work/entries/batch', { person_id: person, date, kind, text });
+    if (person === work.person) await loadWorkWeek(work.start, { keepTarget: true });
+    const who = person === work.person ? '' : `（记在「${personName(person)}」名下）`;
+    toast(`已记录 ${r.count} 条${r.truncated ? '（只记了前 5 条，后面的没有记）' : ''}${note}${who}`, 7000, {
       label: '撤销',
       onClick: async () => {
-        try { await postJson('/api/work/entries/delete', { ids: r.ids }); toast('已撤销'); loadWorkWeek(work.start, { keepTarget: true }); }
+        try { await postJson('/api/work/entries/delete', { ids: r.ids }); toast('已撤销'); if (person === work.person) loadWorkWeek(work.start, { keepTarget: true }); }
         catch (err) { toast(err.message); }
       },
     });
@@ -1230,11 +1239,15 @@
     const id = work.editing;
     if (id == null || work.saving) return;
     if (!await askConfirm('删除这条记录？', { okText: '删除', danger: true })) return;
+    if (work.editing !== id || work.saving) return;   // 等确认期间编辑弹层可能已经关了或在保存
+    work.saving = true; $('#we-save').disabled = true; $('#we-del').disabled = true;   // 删除期间不能再保存、再删或关闭
     try {
       await api('/api/work/entries/' + id, { method: 'DELETE' });
+      work.saving = false;
       closeWorkEditor();
       loadWorkWeek(work.start, { keepTarget: true });
     } catch (err) { $('#we-err').textContent = err.message; }
+    finally { work.saving = false; $('#we-save').disabled = false; $('#we-del').disabled = false; }
   });
 
   // 周报
@@ -1244,7 +1257,7 @@
     btn.disabled = true;
     try {
       const r = await api(`/api/work/report?start=${encodeURIComponent(work.start)}&person=${work.person}`);
-      if (r.empty) { toast('这一周还没有记录'); return; }
+      if (r.empty) { toast('这一周还没有记录（只有下周待办时也不生成，先记一条本周做的）'); return; }
       $('#wr-text').value = r.text;   // 纯文本，用 value 赋值，不经 innerHTML
       $('#work-report').classList.remove('hidden');
     } catch (err) { toast(err.message); }

@@ -1566,14 +1566,15 @@
     e.target.value = '';
     if (!files.length) return;
     let okCount = 0;
-    const failed = [];
+    const failed = [], cut = [];
     for (const f of files) {   // 一份一份传，某一份失败不影响其他的
       try {
-        await api('/api/report/examples', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Report-Title': encodeURIComponent(f.name.replace(/\.docx$/i, '')) }, body: f });
+        const r = await api('/api/report/examples', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Report-Title': encodeURIComponent(f.name.replace(/\.docx$/i, '')) }, body: f });
         okCount++;
+        if (r.truncated) cut.push(f.name);
       } catch (err) { failed.push(`${f.name}：${err.message}`); }
     }
-    toast(`已上传 ${okCount} 份示例` + (failed.length ? '；失败：' + failed.join('；') : ''), 7000);
+    toast(`已上传 ${okCount} 份示例` + (cut.length ? `（${cut.join('、')} 超过 6000 字，只保留了前 6000 字）` : '') + (failed.length ? '；失败：' + failed.join('；') : ''), 8000);
     loadReportStatus();
   });
   $('#rp-examples').addEventListener('click', async e => {
@@ -1633,6 +1634,7 @@
   });
 
   // ---- 草稿 ----
+  const draftErr = msg => { const el = $('#rpd-err'); el.textContent = msg; if (msg) el.scrollIntoView({ block: 'nearest' }); };
   const syncDraftButtons = () => {
     const items = $$('#rpd-items .rpd-item');
     items.forEach(box => { $('.rpd-del', box).disabled = items.length <= 1; });   // 至少保留一个项目
@@ -1673,7 +1675,7 @@
     $('#rpd-issues').value = draft.issues;
     $('#rpd-items').textContent = ''; draft.items.forEach(addDraftItem);
     $('#rpd-plan').textContent = ''; draft.plan.forEach(addDraftPlan);
-    $('#rpd-err').textContent = '';
+    draftErr('');
     renderDraftDates();
     $('#report-draft').classList.remove('hidden');
   }
@@ -1697,7 +1699,7 @@
       report.dates = d; report.kind = d.kind;
       $('#rpd-plan-range').value = d.planRange;
       renderDraftDates();
-    } catch (err) { $('#rpd-err').textContent = err.message; }
+    } catch (err) { draftErr(err.message); }
   }));
   const closeReportDraft = () => { if (report.busy) return; $('#report-draft').classList.add('hidden'); };
   $('#rpd-cancel').addEventListener('click', closeReportDraft);   // 草稿里改了很多东西，所以不绑定点背景关闭，免得误触丢失
@@ -1718,14 +1720,14 @@
       draft: { items, issues: $('#rpd-issues').value.trim(), plan: $$('#rpd-plan .rpd-plan-text').map(i => i.value.trim()).filter(Boolean) },
       time: $('#rpd-time').value.trim(), planRange: $('#rpd-plan-range').value.trim(), kind: report.kind, start: report.start,
     };
-    report.busy = true; $('#rpd-export').disabled = true; $('#rpd-err').textContent = '';
+    report.busy = true; $('#rpd-export').disabled = true; draftErr('');
     try {
       const res = await fetch('/api/report/export', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (res.status === 401) { showLogin(); return; }
       if (!res.ok) {
         let msg = '导出失败';
         try { msg = (await res.json()).error || msg; } catch { /* 响应不是 JSON */ }
-        $('#rpd-err').textContent = msg;   // 失败时弹层不关，用户的修改都还在
+        draftErr(msg);   // 失败时弹层不关，用户的修改都还在
         return;
       }
       const blob = await res.blob();
@@ -1741,7 +1743,7 @@
       toast('已导出：' + name, 4000);
       $('#report-draft').classList.add('hidden');
       loadReportStatus();   // 导出的周报自动成为示例，设置页的示例数跟着变
-    } catch (err) { $('#rpd-err').textContent = (err && err.message) || '导出失败'; }
+    } catch (err) { draftErr((err && err.message) || '导出失败'); }
     finally { report.busy = false; $('#rpd-export').disabled = false; renderReportButton(); }
   });
 

@@ -200,5 +200,49 @@ check('fillTemplate：多于模板原有行数的计划和项目（模板只有 
   eq(lines(out).filter(l => /^\d \| 新计划/.test(l)).length, 2);
 });
 
+// ---------- 终审补充 ----------
+const timed = fn => { const t = Date.now(); const r = fn(); return [r, Date.now() - t]; };
+const withDoc = (tpl, fn) => { const z = readZip(tpl); z.set('word/document.xml', Buffer.from(fn(z.get('word/document.xml').toString('utf8')))); return writeZip(z); };
+
+check('含修订记录 / 被插入的内容的模板：上传时就拒绝并说明怎么办（否则按懒惰正则截取会生成不配对的标签）', () => {
+  for (const opts of [{ trackedChanges: true }, { insertedRun: true }]) {
+    const msg = throws(() => checkTemplate(buildTemplate(opts)), STRUCT);
+    if (!msg.includes('修订')) throw new Error('应提示修订记录：' + msg);
+    throws(() => fillTemplate(buildTemplate(opts), DATA), STRUCT);
+  }
+});
+check('标签不配对的文档被拒绝；大量没闭合的 <w:tr> 也被很快拒绝（不会让正则卡住）', () => {
+  const broken = withDoc(buildTemplate(), x => x.replace('</w:p></w:tc></w:tr></w:tbl>', '</w:tc></w:tr></w:tbl>'));
+  if (!throws(() => checkTemplate(broken), STRUCT).includes('不配对')) throw new Error('应提示标签不配对');
+  const bomb = withDoc(buildTemplate(), x => x.replace('</w:tbl>', '<w:tr>'.repeat(300000) + '</w:tbl>'));
+  const [, ms] = timed(() => { try { checkTemplate(bomb); } catch (e) { return e.message; } });
+  if (ms > 2000) throw new Error(`拒绝太慢：${ms} ms`);
+  throws(() => checkTemplate(bomb), STRUCT);
+});
+check('「需协调的问题」那一行也把固定行高改成最小行高', () => {
+  const out = fillTemplate(buildTemplate(), { ...DATA, issues: '需要采购配件' });
+  const rows = [...doc(out).matchAll(/<w:tr[ >][\s\S]*?<\/w:tr>/g)].map(m => m[0]);
+  const issue = rows.find(r => r.includes('需要采购配件'));
+  if (issue.includes('hRule="exact"') || !issue.includes('hRule="atLeast"')) throw new Error('问题行行高没改');
+  if (!rows.find(r => r.includes('技术部')).includes('hRule="exact"')) throw new Error('抬头行不该被改动');
+});
+check('编号层级取自样板细节段（ilvl 不是 0 时 startOverride 也用同一层）', () => {
+  const out = fillTemplate(buildTemplate({ detailIlvl: 1 }), DATA);
+  const n = numbering(out);
+  eq(count(n, /<w:lvlOverride w:ilvl="1"><w:startOverride w:val="1"\/>/g), 3);
+  eq(count(n, /<w:lvlOverride w:ilvl="0">/g), 0);
+});
+check('标题段带 numId=0（取消编号）不算「带编号」，不误拒绝', () => {
+  const tpl = buildTemplate({ titleNumZero: true });
+  eq(checkTemplate(tpl), { name: '测试员' });
+  eq(lines(fillTemplate(tpl, DATA)).filter(l => /^\d \| 项目/.test(l)).length, 3);
+});
+check('压缩包层面的问题透传固定文案（条目过多），其余仍是「不是有效的 docx 文件」', () => {
+  const many = writeZip(Array.from({ length: 201 }, (_, i) => [`f${i}.txt`, Buffer.from('x')]));
+  throws(() => checkTemplate(many), '压缩包条目过多');
+  throws(() => extractText(many), '压缩包条目过多');
+  throws(() => checkTemplate(Buffer.from('不是 zip')), '不是有效的 docx 文件');
+});
+
 console.log(`\n${pass} 通过，${fail} 失败`);
 if (fail) process.exit(1);

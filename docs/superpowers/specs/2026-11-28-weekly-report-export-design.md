@@ -88,13 +88,13 @@
 | `POST /api/report/template` | 请求体是 docx 二进制（≤ 5 MB）；校验结构并试填，成功后替换模板 |
 | `POST /api/report/examples` | 请求体是 docx 二进制；抽取文字存为示例（≤ 6000 字，超出截断并提示） |
 | `DELETE /api/report/examples/:id` | 删除一份示例 |
-| `GET /api/report/dates?start=&today=&kind=` | 返回按规则算出的 `{kind, range:{from,to}, time, planRange, filename}`；`kind` 可选，给了就用它（`single`/`double`） |
+| `GET /api/report/dates?start=&today=&kind=` | 返回按规则算出的 `{kind, from, to, time, planRange, filename}`；`kind` 可选，给了就用它（`single`/`double`） |
 | `POST /api/report/prepare` `{person, start}` | 组装发给 AI 的完整提示词，**不调用 AI** → `{prompt, hash, chars, examples, empty}`；`hash` 是提示词的 SHA-256（十六进制前 32 位），用于发送前预览 |
 | `POST /api/report/generate` `{person, start, hash}` | 服务端**重新组装**提示词并计算指纹，与 `hash` 不一致（预览之后记录、待办或示例变了）⇒ 409「内容在预览之后有变化，请重新预览」，**不调用 AI**；一致才调 AI → 草稿 `{items, issues, plan}`。其他错误码：503 未配置 / 409 还没上传模板 / 429 次数用完或正在整理上一份 / 502 AI 出错 / 504 超时；整理期间同一时间只处理一个 |
 | `POST /api/report/export` `{draft, time, planRange, kind, start}` | 校验后返回 docx 二进制，`Content-Disposition` 带中文文件名（RFC 5987）；同时把内容存为示例。校验：`draft.items` **至少 1 项**，每项 `title` 非空（去空白后）、`lines` 可以为空数组（只输出标题）、`progress` 为 0–100 的整数；`draft.plan` 可以为空数组（此时计划区保留**一行全空**的样板，序号也留空），非空的每条文字非空；`draft.issues` 为空时按「无」处理；`time` 与 `planRange` 必须是 `YYYY.M.D` / `YYYY.M.D-YYYY.M.D` 格式；各项数量和长度上限同上。「时间」和签名处的日期是**同一个值**（`time`） |
 
 - `person` 校验沿用 `workPersonId`；`start` 归一到周一；缺少模板时 `prepare` / `generate` / `export` 返回 409「请先在设置里上传周报模板」。
-- 服务启动时只在日志里打印「周报导出已启用（沿用图片识别的配置 / 单独配置）」之类，**不打印模型名以外的任何配置**。
+- 服务启动时只在日志里打印「周报整理已启用（沿用图片识别的配置 / 单独配置）」之类，**不打印模型名以外的任何配置**。
 
 ### 界面
 

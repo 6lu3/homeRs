@@ -12,11 +12,13 @@ const W = [1168, 1692, 1692, 1853, 2054, 2280];          // 6 列网格
 const W3 = W[1] + W[2] + W[3], W2 = W[4] + W[5], W6 = W.reduce((a, b) => a + b, 0);
 
 function buildTemplate(opts = {}) {
-  const { name = '测试员', workRows = 3, planRows = 3, omit, extraTable = false, badSpan = false, fourCells = false, signRuns } = opts;
+  const { name = '测试员', workRows = 3, planRows = 3, omit, extraTable = false, badSpan = false, fourCells = false, signRuns,
+    trackedChanges = false, insertedRun = false, detailIlvl = 0, titleNumZero = false } = opts;
   let pid = 0;
   const id = () => `w14:paraId="${(++pid).toString(16).toUpperCase().padStart(8, '0')}"`;
-  const para = (text, { numId, jc = 'left' } = {}) =>
-    `<w:p ${id()}><w:pPr>${numId ? `<w:numPr><w:ilvl w:val="0"/><w:numId w:val="${numId}"/></w:numPr>` : ''}<w:spacing w:line="26" w:lineRule="atLeast"/><w:jc w:val="${jc}"/>${RPR}</w:pPr><w:r>${RPR}<w:t>${esc(text)}</w:t></w:r></w:p>`;
+  // extraPPr：塞进 pPr 里的额外内容（修订记录、numId=0 等）；ilvl：编号层级
+  const para = (text, { numId, jc = 'left', ilvl = 0, extraPPr = '', extraRuns = '' } = {}) =>
+    `<w:p ${id()}><w:pPr>${numId !== undefined ? `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${numId}"/></w:numPr>` : ''}<w:spacing w:line="26" w:lineRule="atLeast"/><w:jc w:val="${jc}"/>${RPR}${extraPPr}</w:pPr><w:r>${RPR}<w:t>${esc(text)}</w:t></w:r>${extraRuns}</w:p>`;
   const cell = (width, span, paras) =>
     `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${span > 1 ? `<w:gridSpan w:val="${span}"/>` : ''}<w:vAlign w:val="center"/></w:tcPr>${paras.join('')}</w:tc>`;
   const row = (cells, height, rule = 'exact') =>
@@ -44,8 +46,12 @@ function buildTemplate(opts = {}) {
   rows.push(row([cell(W6, 6, one('本周工作内容'))], 400));
   rows.push(row([cell(W[0], 1, one('序号')), cell(W3, 3, one(label('workHeader', '工作内容'))), cell(W2, 2, one('解决方案及结果'))], 400));
   for (let k = 1; k <= workRows; k++) {
-    const content = [para(`事项${NUMS[k - 1] || k}`)];
-    if (omit !== 'detailPara') content.push(para('细节一', { numId: k }), para('细节二', { numId: k }));
+    // 标题段：可以带 <w:numId w:val="0"/>（Word 用它取消样式自带的编号）、修订记录或被插入的 run（用来造「有修订」的坏模板）
+    const titleOpts = { ...(titleNumZero ? { numId: 0 } : {}),
+      ...(trackedChanges && k === 1 ? { extraPPr: '<w:pPrChange w:id="1" w:author="某人" w:date="2026-01-01T00:00:00Z"><w:pPr><w:jc w:val="left"/></w:pPr></w:pPrChange>' } : {}),
+      ...(insertedRun && k === 1 ? { extraRuns: `<w:ins w:id="2" w:author="某人" w:date="2026-01-01T00:00:00Z"><w:r>${RPR}<w:t>插入的</w:t></w:r></w:ins>` } : {}) };
+    const content = [para(`事项${NUMS[k - 1] || k}`, titleOpts)];
+    if (omit !== 'detailPara') content.push(para('细节一', { numId: k, ilvl: detailIlvl }), para('细节二', { numId: k, ilvl: detailIlvl }));
     const cells = [cell(W[0], 1, one(String(k), 'center'))];
     if (fourCells) cells.push(cell(W3, 3, content), cell(W[4], 1, one('额外')), cell(W[5], 1, one('100%')));
     else cells.push(cell(W3, 3, content), cell(W2, badSpan ? 3 : 2, one('100%')));

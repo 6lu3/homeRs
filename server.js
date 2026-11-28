@@ -1382,8 +1382,10 @@ const SAMPLE_FILL = { time: '2000.1.1', items: [{ title: '试填', lines: ['细�
 const mdl = d => `${Number(d.slice(5, 7))}.${Number(d.slice(8, 10))}`;
 const needTemplate = () => { const t = reportStore.getTemplate(); if (!t) throw new HttpError(409, NEED_TEMPLATE); return t; };
 const templateName = t => { try { return reportDocx.checkTemplate(t).name; } catch { return ''; } };
-// 读 docx 出错时只给固定的中文文案，不把内部错误原样返回
-const docxError = e => new HttpError(400, e && /^(模板结构不认识|不是有效的)/.test(e.message) ? e.message : '不是有效的 docx 文件');
+// 读 docx 出错时只给固定的中文文案，不把内部错误原样返回（压缩包层面的几种固定文案可以直接说）
+const docxError = e => new HttpError(400, e && /^(模板结构不认识|不是有效的|压缩包|不支持)/.test(e.message) ? e.message : '不是有效的 docx 文件');
+// 写 data/report 失败（磁盘满、没有权限）时，不要把带绝对路径的系统错误返回给客户端
+const reportWrite = fn => { try { return fn(); } catch { console.log('周报：保存失败'); throw new HttpError(500, '保存失败，请检查服务器的磁盘空间和写入权限'); } };
 const reportDateParam = (url, k) => { const v = url.searchParams.get(k); if (!study.isDate(v)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD'); return v; };
 
 // 本周的材料：记录、本周完成的待办、全部没完成的待办、示例
@@ -1398,12 +1400,12 @@ const reportPrompt = (start, inp) => reportAi.buildPrompt({ weekLabel: `${mdl(st
 
 route('GET', /^\/api\/report\/status$/, (req, res) => {
   const c = reportCfg();
-  json(res, 200, { enabled: c.enabled, hasTemplate: !!reportStore.getTemplate(), examples: reportStore.listExamples(), anchor: reportStore.getSettings().anchor, problem: c.problem });
+  json(res, 200, { enabled: c.enabled, hasTemplate: reportStore.hasTemplate(), examples: reportStore.listExamples(), anchor: reportStore.getSettings().anchor, problem: c.problem });
 });
 route('PUT', /^\/api\/report\/settings$/, async (req, res) => {
   const b = (await readJson(req)) || {};
   if (!study.isDate(b.anchor)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD');
-  reportStore.setSettings({ anchor: b.anchor });
+  reportWrite(() => reportStore.setSettings({ anchor: b.anchor }));
   json(res, 200, reportStore.getSettings());
 });
 route('POST', /^\/api\/report\/template$/, async (req, res) => {
@@ -1412,18 +1414,18 @@ route('POST', /^\/api\/report\/template$/, async (req, res) => {
   let name;
   try { name = reportDocx.checkTemplate(buf).name; } catch (e) { throw docxError(e); }
   try { reportDocx.fillTemplate(buf, SAMPLE_FILL); } catch { throw new HttpError(400, '模板结构不认识：试填失败'); }   // 上传时就试填一次，免得到导出时才发现
-  reportStore.setTemplate(buf);
+  reportWrite(() => reportStore.setTemplate(buf));
   json(res, 200, { ok: true, name });
 });
 route('POST', /^\/api\/report\/examples$/, async (req, res) => {
   const buf = await readBody(req, REPORT_MAX_UPLOAD);
   if (!buf.length) throw new HttpError(400, '文件为空');
   let text;
-  try { text = reportDocx.extractText(buf); } catch { throw new HttpError(400, '不是有效的 docx 文件'); }
+  try { text = reportDocx.extractText(buf); } catch (e) { throw docxError(e); }
   if (!text.trim()) throw new HttpError(400, '没有读到文字');
   let title = '示例';
   try { title = decodeURIComponent(String(req.headers['x-report-title'] || '')) || '示例'; } catch { /* 标题解码失败就用默认 */ }
-  const id = reportStore.addExample({ title, text });
+  const id = reportWrite(() => reportStore.addExample({ title, text }));
   const chars = [...text].length;
   json(res, 200, { id, chars, truncated: chars > reportAi.LIMITS.example });
 });

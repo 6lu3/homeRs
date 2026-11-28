@@ -645,7 +645,7 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     r = await call('GET', '/api/report/status');
     assert(r.status === 200 && typeof r.body.enabled === 'boolean' && typeof r.body.hasTemplate === 'boolean' && Array.isArray(r.body.examples) && /^\d{4}-\d{2}-\d{2}$/.test(r.body.anchor), '周报导出：status 的结构');
     assert(Object.keys(r.body).every(k => ['enabled', 'hasTemplate', 'examples', 'anchor', 'problem'].includes(k)), '周报导出：status 里没有多余的字段（不会有 key）');
-    const had = r.body.hasTemplate, aiOn = r.body.enabled, anchor0 = r.body.anchor;
+    const had = r.body.hasTemplate, aiOn = r.body.enabled, anchor0 = r.body.anchor, hadExamples = r.body.examples.length > 0;
 
     // 日期规则（只读）
     for (const q of ['', '?today=2032-03-06', '?start=2032-03-01', '?start=2032-02-30&today=2032-03-06', '?start=2032-03-01&today=abc', '?start=2032-03-01&today=2032-03-06&kind=weird']) {
@@ -661,8 +661,9 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     r = await call('GET', '/api/report/dates?start=2032-03-01&today=2032-03-05');
     assert(r.body.kind === 'double', '周报导出：周五当天生成按双休');
 
-    if (had) {
-      console.log('跳过：服务器上已有周报模板，不做会改动它的检查（请只在临时数据目录上运行冒烟测试）');
+    if (had || hadExamples) {
+      // 上传示例和导出都会挤掉已有的示例（最多保留 4 份），模板又没有删除接口，所以有模板或有示例时一律不做写入类检查
+      console.log('跳过：服务器上已有周报模板或示例，不做会改动它们的检查（请只在临时数据目录上运行冒烟测试）');
     } else {
       const me = (await call('GET', '/api/work/people')).body[0];
       const EMPTY = { person: me.id, start: '2032-06-07' };          // 没有任何记录的一周
@@ -767,7 +768,6 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       }
 
       // 导出
-      const before = (await call('GET', '/api/report/status')).body.examples.length;
       const out = await raw('POST', '/api/report/export', JSON.stringify(EXPORT), { 'content-type': 'application/json' });
       assert(out.status === 200 && (out.headers.get('content-type') || '').includes('wordprocessingml.document'), '周报导出：export 返回 docx');
       const cd = out.headers.get('content-disposition') || '';
@@ -775,7 +775,7 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       const text = extractText(out.buf);
       assert(readZip(out.buf).has('word/document.xml') && text.includes('冒烟标题') && text.includes('细节乙') && text.includes('70%') && text.includes('冒烟计划') && text.includes('2032.3.8-2032.3.12') && text.includes('2032.3.6'), '周报导出：导出的 docx 能解开，含填入的内容和日期');
       r = await call('GET', '/api/report/status');
-      assert(r.body.examples.length === before + 1 && r.body.examples.some(x => x.title === '3.1-3.6'), '周报导出：导出后自动多了一份示例');
+      assert(r.body.examples.some(x => x.title === '3.1-3.6'), '周报导出：导出后自动多了一份示例');
       for (const x of r.body.examples.filter(x => x.title === '3.1-3.6')) await call('DELETE', `/api/report/examples/${x.id}`);   // 清理
       // 注意：模板没有删除接口，冒烟会留下一份合成模板；真实使用前请在设置里上传你自己的模板（会替换它）
     }

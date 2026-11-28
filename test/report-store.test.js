@@ -19,10 +19,22 @@ const tmp = () => { const d = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'r
 check('模板：没有时为 null，读写往返（目录不存在时自动创建）', () => {
   const s = createReportStore(tmp());
   eq(s.getTemplate(), null);
+  eq(s.hasTemplate(), false);
   s.setTemplate(Buffer.from([1, 2, 3, 0, 255]));
+  eq(s.hasTemplate(), true);
   ok(s.getTemplate().equals(Buffer.from([1, 2, 3, 0, 255])));
   s.setTemplate(Buffer.from('新的'));
   eq(s.getTemplate().toString(), '新的');
+});
+check('同标题替换：新的写失败时，旧的还在（先写新的再删旧的）', () => {
+  const d = tmp(), s = createReportStore(d);
+  s.addExample({ title: '同名', text: '旧' });
+  const realRename = fs.renameSync;
+  fs.renameSync = () => { throw new Error('磁盘满了'); };
+  let threw = false;
+  try { s.addExample({ title: '同名', text: '新' }); } catch { threw = true; } finally { fs.renameSync = realRename; }
+  ok(threw, '写入失败应当抛错');
+  eq(s.readExamples(), ['旧']);
 });
 check('设置：缺省、往返、归一到周一、文件损坏按缺省', () => {
   const d = tmp(), s = createReportStore(d);

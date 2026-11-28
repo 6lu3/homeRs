@@ -627,6 +627,160 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
     }
   }
 
+  // 正式周报导出。写入类检查会改动服务端的 data/report（上传模板和示例），而模板没有删除接口，
+  // 所以只在服务器上还没有模板时才做；已经有模板时只做只读检查。请只在临时数据目录上运行冒烟测试。
+  // 另外：只有服务器没有配置 AI（没有 RECEIPT_* / REPORT_*）时才测 generate，避免冒烟测试去调用真实的 AI。
+  {
+    const { readZip } = require('../lib/zip');
+    const { buildTemplate } = require('./helpers/report-template');
+    const { extractText } = require('../lib/report-docx');
+    const raw = async (method, path, body, headers = {}) => {
+      const res = await fetch(BASE + path, { method, headers: { cookie, ...headers }, body });
+      return { status: res.status, headers: res.headers, buf: Buffer.from(await res.arrayBuffer()) };
+    };
+    const BIN = { 'content-type': 'application/octet-stream' };
+    const unauth = await fetch(BASE + '/api/report/status');
+    assert(unauth.status === 401, '周报导出：未登录访问 status 被拒绝');
+
+    r = await call('GET', '/api/report/status');
+    assert(r.status === 200 && typeof r.body.enabled === 'boolean' && typeof r.body.hasTemplate === 'boolean' && Array.isArray(r.body.examples) && /^\d{4}-\d{2}-\d{2}$/.test(r.body.anchor), '周报导出：status 的结构');
+    assert(Object.keys(r.body).every(k => ['enabled', 'hasTemplate', 'examples', 'anchor', 'problem'].includes(k)), '周报导出：status 里没有多余的字段（不会有 key）');
+    const had = r.body.hasTemplate, aiOn = r.body.enabled, anchor0 = r.body.anchor;
+
+    // 日期规则（只读）
+    for (const q of ['', '?today=2032-03-06', '?start=2032-03-01', '?start=2032-02-30&today=2032-03-06', '?start=2032-03-01&today=abc', '?start=2032-03-01&today=2032-03-06&kind=weird']) {
+      r = await call('GET', '/api/report/dates' + q);
+      assert(r.status === 400, `周报导出：dates 参数缺失或非法被拒绝（${q || '无参数'}）`);
+    }
+    r = await call('GET', '/api/report/dates?start=2032-03-01&today=2032-03-06&kind=single');
+    assert(r.status === 200 && r.body.kind === 'single' && r.body.from === '2032-03-01' && r.body.to === '2032-03-06' && r.body.time === '2032.3.6' && r.body.planRange === '2032.3.8-2032.3.12', '周报导出：单休周——到周六，下周计划周一到周五');
+    r = await call('GET', '/api/report/dates?start=2032-03-01&today=2032-03-05&kind=double');
+    assert(r.body.kind === 'double' && r.body.to === '2032-03-05' && r.body.planRange === '2032.3.8-2032.3.13', '周报导出：双休周——到周五，下周计划周一到周六');
+    r = await call('GET', '/api/report/dates?start=2032-03-01&today=2032-03-06');
+    assert(r.body.kind === 'single', '周报导出：周六当天生成按单休');
+    r = await call('GET', '/api/report/dates?start=2032-03-01&today=2032-03-05');
+    assert(r.body.kind === 'double', '周报导出：周五当天生成按双休');
+
+    if (had) {
+      console.log('跳过：服务器上已有周报模板，不做会改动它的检查（请只在临时数据目录上运行冒烟测试）');
+    } else {
+      const me = (await call('GET', '/api/work/people')).body[0];
+      const EMPTY = { person: me.id, start: '2032-06-07' };          // 没有任何记录的一周
+      const HASH = 'a'.repeat(32);
+      const DRAFT = { items: [{ title: '冒烟标题', lines: ['细节甲', '细节乙'], progress: 70 }], issues: '无', plan: ['冒烟计划'] };
+      const EXPORT = { draft: DRAFT, time: '2032.3.6', planRange: '2032.3.8-2032.3.12', kind: 'single', start: '2032-03-01' };
+
+      // 没有模板
+      r = await json('POST', '/api/report/prepare', { ...EMPTY, person: 999999 });
+      assert(r.status === 400 && r.body.error === '人员不存在', '周报导出：prepare 的人员不存在被拒绝');
+      r = await json('POST', '/api/report/prepare', EMPTY);
+      assert(r.status === 409 && r.body.error === '请先在设置里上传周报模板', '周报导出：没有模板时 prepare 返回 409');
+      r = await json('POST', '/api/report/generate', { ...EMPTY, hash: HASH });
+      assert(r.status === 409 && r.body.error === '请先在设置里上传周报模板', '周报导出：没有模板时 generate 返回 409');
+      r = await json('POST', '/api/report/export', EXPORT);
+      assert(r.status === 409 && r.body.error === '请先在设置里上传周报模板', '周报导出：没有模板时 export 返回 409');
+
+      // 上传模板
+      r = await call('POST', '/api/report/template', Buffer.from('随机内容，不是 docx'), BIN);
+      assert(r.status === 400 && r.body.error === '不是有效的 docx 文件', '周报导出：上传不是 docx 的内容被拒绝');
+      r = await call('POST', '/api/report/template', Buffer.alloc(0), BIN);
+      assert(r.status === 400 && r.body.error === '文件为空', '周报导出：上传空文件被拒绝');
+      r = await call('POST', '/api/report/template', buildTemplate({ omit: 'workHeader' }), BIN);
+      assert(r.status === 400 && String(r.body.error).startsWith('模板结构不认识'), '周报导出：结构不认识的模板被拒绝并说明');
+      r = await call('GET', '/api/report/status');
+      assert(r.body.hasTemplate === false, '周报导出：被拒绝的模板没有保存');
+      r = await call('POST', '/api/report/template', buildTemplate(), BIN);
+      assert(r.status === 200 && r.body.ok === true && r.body.name === '测试员', '周报导出：上传合成模板成功并返回姓名');
+      r = await call('GET', '/api/report/status');
+      assert(r.body.hasTemplate === true, '周报导出：上传后 status 显示有模板');
+
+      // 导出前的校验
+      for (const [bad, msg, why] of [
+        [{ ...EXPORT, draft: { ...DRAFT, items: [] } }, '至少要有一个工作项', '空的工作项'],
+        [{ ...EXPORT, draft: { ...DRAFT, items: [{ title: '  ', lines: [], progress: 1 }] } }, '项目标题不能为空', '空标题'],
+        [{ ...EXPORT, draft: { ...DRAFT, items: [{ title: 't', lines: [], progress: 50.5 }] } }, '完成度应为 0–100 的整数', '小数完成度'],
+        [{ ...EXPORT, draft: 'x' }, '草稿格式不对', '草稿不是对象'],
+        [{ ...EXPORT, time: '2032-03-06' }, '日期格式不对', '时间格式不对'],
+        [{ ...EXPORT, planRange: '2032.3.12-2032.3.8' }, '日期格式不对', '计划日期起晚于止'],
+        [{ ...EXPORT, kind: 'x' }, '本周类型无效', '本周类型无效'],
+      ]) {
+        r = await json('POST', '/api/report/export', bad);
+        assert(r.status === 400 && r.body.error === msg, `周报导出：export 校验——${why}`);
+      }
+
+      // 示例
+      r = await call('POST', '/api/report/examples', Buffer.from('不是 docx'), { ...BIN, 'x-report-title': encodeURIComponent('冒烟示例') });
+      assert(r.status === 400 && r.body.error === '不是有效的 docx 文件', '周报导出：上传的示例不是 docx 被拒绝');
+      r = await call('POST', '/api/report/examples', Buffer.alloc(0), BIN);
+      assert(r.status === 400 && r.body.error === '文件为空', '周报导出：上传空示例被拒绝');
+      r = await call('POST', '/api/report/examples', buildTemplate(), { ...BIN, 'x-report-title': encodeURIComponent('冒烟示例') });
+      assert(r.status === 200 && r.body.id > 0 && r.body.chars > 0 && r.body.truncated === false, '周报导出：上传示例成功');
+      const exId = r.body.id;
+      r = await call('GET', '/api/report/status');
+      assert(r.body.examples.some(x => x.id === exId && x.title === '冒烟示例'), '周报导出：status 里能看到示例');
+      r = await call('DELETE', `/api/report/examples/${exId}`);
+      assert(r.status === 200, '周报导出：删除示例');
+      r = await call('DELETE', `/api/report/examples/${exId}`);
+      assert(r.status === 404 && r.body.error === '示例不存在', '周报导出：重复删除示例返回 404');
+      r = await call('DELETE', '/api/report/examples/abc');
+      assert(r.status === 404, '周报导出：示例 id 不是数字时不匹配路由');
+
+      // 设置：基准单休周，并确认 dates 用的是保存的基准
+      r = await json('PUT', '/api/report/settings', { anchor: '2032-03-03' });
+      assert(r.status === 200 && r.body.anchor === '2032-03-01', '周报导出：保存基准单休周（归一到周一）');
+      r = await json('PUT', '/api/report/settings', { anchor: '2032-13-01' });
+      assert(r.status === 400 && r.body.error === '日期格式应为 YYYY-MM-DD', '周报导出：基准日期非法被拒绝');
+      try {
+        r = await call('GET', '/api/report/dates?start=2032-03-01&today=2032-03-02');
+        assert(r.body.kind === 'single', '周报导出：基准周按单休');
+        r = await call('GET', '/api/report/dates?start=2032-03-08&today=2032-03-09');
+        assert(r.body.kind === 'double' && r.body.filename === '测试员3.8-3.12-周报.docx', '周报导出：基准的下一周按双休，文件名带模板里的姓名');
+      } finally {
+        await json('PUT', '/api/report/settings', { anchor: anchor0 });   // 恢复原来的基准
+      }
+
+      // 有记录的一周：prepare / generate / export
+      r = await json('POST', '/api/report/prepare', EMPTY);
+      assert(r.status === 200 && r.body.empty === true, '周报导出：没有记录的一周 prepare 返回 empty');
+      r = await json('POST', '/api/report/generate', { ...EMPTY, hash: HASH });
+      assert(r.status === 400 && r.body.error === '这一周还没有记录', '周报导出：没有记录的一周 generate 被拒绝');
+      r = await json('POST', '/api/report/generate', { person: me.id, start: '2032-03-01' });
+      assert(r.status === 400, '周报导出：generate 缺指纹被拒绝');
+      r = await json('POST', '/api/report/generate', { person: me.id, start: '2032-03-01', hash: 'xyz' });
+      assert(r.status === 400, '周报导出：generate 的指纹格式不对被拒绝');
+      r = await json('POST', '/api/work/entries', { person_id: me.id, date: '2032-03-03', text: '冒烟周报的记录' });
+      assert(r.status === 200, '周报导出：为 prepare 建一条记录');
+      const eid = r.body.id;
+      try {
+        r = await json('POST', '/api/report/prepare', { person: me.id, start: '2032-03-01' });
+        assert(r.status === 200 && r.body.empty === false && r.body.prompt.includes('冒烟周报的记录') && /^[0-9a-f]{32}$/.test(r.body.hash) && r.body.chars === [...r.body.prompt].length, '周报导出：prepare 返回提示词、指纹和字数');
+        const hash1 = r.body.hash;
+        r = await json('POST', '/api/report/prepare', { person: me.id, start: '2032-03-01' });
+        assert(r.body.hash === hash1, '周报导出：同样的内容两次 prepare 指纹相同');
+        if (aiOn) console.log('跳过：服务器配置了 AI，不测 generate（避免调用真实的 AI）');
+        else {
+          r = await json('POST', '/api/report/generate', { person: me.id, start: '2032-03-01', hash: hash1 });
+          assert(r.status === 503 && r.body.error === '周报整理未配置', '周报导出：AI 没配置时 generate 返回 503');
+        }
+      } finally {
+        await call('DELETE', `/api/work/entries/${eid}`);
+      }
+
+      // 导出
+      const before = (await call('GET', '/api/report/status')).body.examples.length;
+      const out = await raw('POST', '/api/report/export', JSON.stringify(EXPORT), { 'content-type': 'application/json' });
+      assert(out.status === 200 && (out.headers.get('content-type') || '').includes('wordprocessingml.document'), '周报导出：export 返回 docx');
+      const cd = out.headers.get('content-disposition') || '';
+      assert(cd.includes("filename*=UTF-8''") && decodeURIComponent(cd.split("filename*=UTF-8''")[1]) === '测试员3.1-3.6-周报.docx', '周报导出：下载文件名带中文，取自模板姓名和本周范围');
+      const text = extractText(out.buf);
+      assert(readZip(out.buf).has('word/document.xml') && text.includes('冒烟标题') && text.includes('细节乙') && text.includes('70%') && text.includes('冒烟计划') && text.includes('2032.3.8-2032.3.12') && text.includes('2032.3.6'), '周报导出：导出的 docx 能解开，含填入的内容和日期');
+      r = await call('GET', '/api/report/status');
+      assert(r.body.examples.length === before + 1 && r.body.examples.some(x => x.title === '3.1-3.6'), '周报导出：导出后自动多了一份示例');
+      for (const x of r.body.examples.filter(x => x.title === '3.1-3.6')) await call('DELETE', `/api/report/examples/${x.id}`);   // 清理
+      // 注意：模板没有删除接口，冒烟会留下一份合成模板；真实使用前请在设置里上传你自己的模板（会替换它）
+    }
+  }
+
   // 清理（只删本测试创建的数据）
   for (const i of (await call('GET', '/api/items')).body) if (['酸奶', '创可贴, 大号', '螺丝刀'].includes(i.name)) await call('DELETE', `/api/items/${i.id}?purge=1`);
   r = await json('DELETE', `/api/locations/${shelf.id}`);

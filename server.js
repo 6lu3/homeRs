@@ -1359,6 +1359,124 @@ route('GET', /^\/api\/work\/report$/, (req, res, _m, url) => {
   json(res, 200, work.buildReport({ start, entries, doneTodos, openTodos }));
 });
 
+// ---------- 正式周报导出：AI 整理 + 套用公司 Word 模板（见 lib/zip.js、lib/report-*.js） ----------
+// 模板、示例、设置、用量都在 data/report/（data/ 不进 git）。AI 配置默认沿用图片识别的，规则见 lib/report-ai.js 的 resolveConfig。
+const reportAi = require('./lib/report-ai');
+const reportDates = require('./lib/report-dates');
+const reportDocx = require('./lib/report-docx');
+const { createReportStore } = require('./lib/report-store');
+const { createReportService } = require('./lib/report-service');
+const REPORT_DIR = path.join(DATA_DIR, 'report');
+const reportStore = createReportStore(REPORT_DIR);
+const reportCfg = () => reportAi.resolveConfig(config.report, process.env, resolveReceiptConfig(config.receipt, process.env));
+const reportService = createReportService({ getConfig: reportCfg, dataDir: REPORT_DIR });
+{
+  const c = reportCfg();
+  if (c.problem) console.log(`周报整理配置有问题：${c.problem}`);
+  else if (c.enabled) console.log(`周报整理已启用（${c.inherited ? '沿用图片识别的配置' : '单独配置'}）`);   // 只说用的哪套配置，不打印地址和 key
+}
+const REPORT_MAX_UPLOAD = 5 * 1024 * 1024;
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const NEED_TEMPLATE = '请先在设置里上传周报模板';
+const SAMPLE_FILL = { time: '2000.1.1', items: [{ title: '试填', lines: ['细节'], progress: 100 }], issues: '无', plan: ['计划'], planRange: '2000.1.1-2000.1.7' };
+const mdl = d => `${Number(d.slice(5, 7))}.${Number(d.slice(8, 10))}`;
+const needTemplate = () => { const t = reportStore.getTemplate(); if (!t) throw new HttpError(409, NEED_TEMPLATE); return t; };
+const templateName = t => { try { return reportDocx.checkTemplate(t).name; } catch { return ''; } };
+// 读 docx 出错时只给固定的中文文案，不把内部错误原样返回
+const docxError = e => new HttpError(400, e && /^(模板结构不认识|不是有效的)/.test(e.message) ? e.message : '不是有效的 docx 文件');
+const reportDateParam = (url, k) => { const v = url.searchParams.get(k); if (!study.isDate(v)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD'); return v; };
+
+// 本周的材料：记录、本周完成的待办、全部没完成的待办、示例
+function reportInputs(person, start) {
+  const end = menu.addDays(start, 6);
+  const entries = workEntriesBetween(person, start, end).map(e => ({ date: e.date, text: e.text }));
+  const doneTodos = db.prepare('SELECT done_date AS date, text FROM work_todos WHERE person_id = ? AND done = 1 AND done_date >= ? AND done_date <= ? ORDER BY done_date, id').all(person, start, end).map(r => ({ date: r.date, text: r.text }));
+  const openTodos = db.prepare('SELECT due_date, text FROM work_todos WHERE person_id = ? AND done = 0 ORDER BY id').all(person).map(r => ({ due_date: r.due_date, text: r.text }));
+  return { entries, doneTodos, openTodos, examples: reportStore.readExamples(), empty: !entries.length && !doneTodos.length };
+}
+const reportPrompt = (start, inp) => reportAi.buildPrompt({ weekLabel: `${mdl(start)}-${mdl(menu.addDays(start, 6))}`, ...inp });
+
+route('GET', /^\/api\/report\/status$/, (req, res) => {
+  const c = reportCfg();
+  json(res, 200, { enabled: c.enabled, hasTemplate: !!reportStore.getTemplate(), examples: reportStore.listExamples(), anchor: reportStore.getSettings().anchor, problem: c.problem });
+});
+route('PUT', /^\/api\/report\/settings$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  if (!study.isDate(b.anchor)) throw new HttpError(400, '日期格式应为 YYYY-MM-DD');
+  reportStore.setSettings({ anchor: b.anchor });
+  json(res, 200, reportStore.getSettings());
+});
+route('POST', /^\/api\/report\/template$/, async (req, res) => {
+  const buf = await readBody(req, REPORT_MAX_UPLOAD);
+  if (!buf.length) throw new HttpError(400, '文件为空');
+  let name;
+  try { name = reportDocx.checkTemplate(buf).name; } catch (e) { throw docxError(e); }
+  try { reportDocx.fillTemplate(buf, SAMPLE_FILL); } catch { throw new HttpError(400, '模板结构不认识：试填失败'); }   // 上传时就试填一次，免得到导出时才发现
+  reportStore.setTemplate(buf);
+  json(res, 200, { ok: true, name });
+});
+route('POST', /^\/api\/report\/examples$/, async (req, res) => {
+  const buf = await readBody(req, REPORT_MAX_UPLOAD);
+  if (!buf.length) throw new HttpError(400, '文件为空');
+  let text;
+  try { text = reportDocx.extractText(buf); } catch { throw new HttpError(400, '不是有效的 docx 文件'); }
+  if (!text.trim()) throw new HttpError(400, '没有读到文字');
+  let title = '示例';
+  try { title = decodeURIComponent(String(req.headers['x-report-title'] || '')) || '示例'; } catch { /* 标题解码失败就用默认 */ }
+  const id = reportStore.addExample({ title, text });
+  const chars = [...text].length;
+  json(res, 200, { id, chars, truncated: chars > reportAi.LIMITS.example });
+});
+route('DELETE', /^\/api\/report\/examples\/(\d+)$/, (req, res, [id]) => {
+  if (!reportStore.removeExample(Number(id))) throw new HttpError(404, '示例不存在');
+  json(res, 200, { ok: true });
+});
+route('GET', /^\/api\/report\/dates$/, (req, res, _m, url) => {
+  const start = reportDateParam(url, 'start'), today = reportDateParam(url, 'today');
+  const t = reportStore.getTemplate();
+  try { json(res, 200, reportDates.reportDates({ start, today, anchor: reportStore.getSettings().anchor, kind: url.searchParams.get('kind') || undefined, name: t ? templateName(t) : '' })); }
+  catch (e) { throw new HttpError(400, e.message); }
+});
+// 发送前预览：只组装提示词，不调用 AI
+route('POST', /^\/api\/report\/prepare$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const person = workPersonId(b.person), start = workWeekStart(b.start);
+  needTemplate();
+  const inp = reportInputs(person, start);
+  if (inp.empty) return json(res, 200, { empty: true });
+  const prompt = reportPrompt(start, inp);
+  json(res, 200, { empty: false, prompt, hash: reportAi.promptHash(prompt), chars: [...prompt].length, examples: inp.examples.length });
+});
+// 整理：服务端重新组装提示词，指纹和预览时不一致就拒绝（见 report-service）
+route('POST', /^\/api\/report\/generate$/, async (req, res) => {
+  const b = (await readJson(req)) || {};
+  const person = workPersonId(b.person), start = workWeekStart(b.start);
+  if (typeof b.hash !== 'string' || !/^[0-9a-f]{32}$/.test(b.hash)) throw new HttpError(400, '缺少预览指纹，请重新预览');
+  needTemplate();
+  const inp = reportInputs(person, start);
+  if (inp.empty) throw new HttpError(400, '这一周还没有记录');
+  try { json(res, 200, await reportService.generate({ prompt: reportPrompt(start, inp), hash: b.hash })); }
+  catch (e) { if (e instanceof ServiceError) throw new HttpError(e.status, e.message); throw e; }
+});
+route('POST', /^\/api\/report\/export$/, async (req, res) => {
+  const tpl = needTemplate();
+  const b = (await readJson(req)) || {};
+  let draft, time, planRange;
+  try { draft = reportAi.validateDraft(b.draft); time = reportAi.validateDotDate(b.time); planRange = reportAi.validateDotRange(b.planRange); }
+  catch (e) { throw new HttpError(400, e.message); }
+  if (b.kind !== 'single' && b.kind !== 'double') throw new HttpError(400, '本周类型无效');
+  const start = workWeekStart(b.start);
+  let buf;
+  try { buf = reportDocx.fillTemplate(tpl, { time, items: draft.items, issues: draft.issues, plan: draft.plan, planRange }); }
+  catch { console.log('周报导出：填充失败'); throw new HttpError(400, '导出失败：模板和内容对不上，请重新上传模板'); }   // 日志不记内容
+  // kind 已显式给出，today 只是凑一个合法日期，不影响 from / to / filename
+  const { from, to, filename } = reportDates.reportDates({ start, today: start, kind: b.kind, name: templateName(tpl) });
+  try { reportStore.addExample({ title: `${mdl(from)}-${mdl(to)}`, text: reportDocx.extractText(buf) }); }   // 导出的周报自动成为之后的示例
+  catch { console.log('周报导出：保存示例失败'); }
+  const star = encodeURIComponent(filename).replace(/['()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  send(res, 200, buf, { 'Content-Type': DOCX_MIME, 'Content-Disposition': `attachment; filename="report.docx"; filename*=UTF-8''${star}`, 'Cache-Control': 'no-store' });
+});
+
 // ---------- 服务器 ----------
 const PUBLIC_ROUTES = new Set(['/api/me', '/api/login', '/api/logout']);
 const server = http.createServer(async (req, res) => {

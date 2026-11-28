@@ -718,13 +718,19 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 
 /* 每周工作 */
 .wk-target { margin: 0; padding: 0 14px 6px; color: var(--muted); font-size: 13px; }
-.wk-kinds { display: inline-flex; flex: none; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-btn); }
-.wk-kind { padding: 8px 10px; border: 0; background: var(--card); color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; }
-.wk-kind.active { background: var(--primary); color: #fff; }
 .wk-day { margin-bottom: 10px; overflow: hidden; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); }
 .wk-day.target { outline: 2px solid var(--primary); outline-offset: -2px; }
-.wk-day-head { display: block; width: 100%; padding: 9px 14px; border: 0; border-bottom: 1px solid var(--line); background: var(--field-bg); color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; }
+.wk-day-bar { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--field-bg); }
+.wk-day-head { display: block; min-width: 0; flex: 1; padding: 9px 14px; border: 0; background: none; color: var(--text); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; cursor: pointer; }
+.wk-day-plus { flex: none; width: 44px; border: 0; background: none; color: var(--primary-dark); font: inherit; font-size: 20px; line-height: 1; cursor: pointer; transition: background .15s ease; }
+.wk-day-plus:hover, .wk-day-plus.on { background: var(--primary-soft); }
 .wk-day.today .wk-day-head { color: var(--primary-dark); }
+.wk-del { flex: none; width: 40px; height: 40px; border: 0; border-radius: 50%; background: none; color: var(--muted); font: inherit; font-size: 20px; line-height: 1; cursor: pointer; transition: all .15s ease; }
+.wk-del:hover { background: var(--danger-soft); color: var(--danger); }
+.wk-del:disabled { opacity: .5; cursor: wait; }
+.wk-day-add { display: flex; gap: 8px; padding: 8px 14px 12px; border-top: 1px dashed var(--line); }
+.wk-day-add input { min-width: 0; flex: 1; }
+.wk-day-add .btn { flex: none; }
 .wk-list { padding: 4px 14px 8px; }
 .wk-empty { padding: 6px 0; color: var(--line); }
 .wk-entry { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
@@ -748,6 +754,7 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
   #view-work > .menu-nav, #view-work > .wk-target, #view-work > #wk-form, #view-work > #work-people, #view-work > .pad { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; padding-right: 0; padding-left: 0; }
   .wk-day-head { padding: 10px 18px; font-size: 14px; }
   .wk-list { padding: 4px 18px 10px; }
+  .wk-day-add { padding: 8px 18px 14px; }
   .wk-txt { font-size: 16px; }
   .wk-day-head:hover { background: var(--primary-soft); }
 }

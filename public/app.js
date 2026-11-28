@@ -433,7 +433,7 @@
   $$('.asr-btn').forEach(btn => btn.addEventListener('click', () => {
     if (asr.state === 'idle') {
       asr.target = btn.dataset.asr;   // 记下是谁发起的，识别结果交给它
-      asr.snap = asr.target === 'work' ? { person: work.person, date: work.target, kind: work.kind } : null;   // 每周工作：记下此刻选好的人员、日期、类型
+      asr.snap = asr.target === 'work' ? { person: work.person, date: work.target } : null;   // 每周工作：记下此刻选好的人员和日期
       asr.state = 'starting'; // 等待权限弹窗期间忽略再次点击
       asrStart().finally(() => { if (asr.state === 'starting') asrUi('idle'); });
     } else if (asr.state === 'recording' && asr.target === btn.dataset.asr) asrStop();
@@ -1057,17 +1057,17 @@
   });
 
   // ---------- 每周工作 ----------
-  const work = { person: null, people: [], start: null, target: null, kind: 'done', week: null, weekSeq: 0, enterSeq: 0, editing: null, saving: false, adding: false };
+  const work = { person: null, people: [], start: null, target: null, addDate: null, week: null, weekSeq: 0, enterSeq: 0, editing: null, saving: false, adding: false };
   // 选中的人员记在这台设备上；隐私模式下 localStorage 可能抛错，忽略即可
   const savedPerson = () => { try { return Number(localStorage.getItem('work_person')); } catch { return 0; } };
   const savePerson = id => { try { localStorage.setItem('work_person', String(id)); } catch { /* 忽略 */ } };
   const personName = id => (work.people.find(p => p.id === id) || {}).name || '';
-  const nextMondayStr = s => addDaysStr(mondayOf(s), 7);   // 与 lib/work.js 的 nextMonday 一致
   const findWorkEntry = id => work.week && work.week.days.flatMap(d => d.entries).find(e => e.id === id);
 
   async function enterWork() {
     const seq = ++work.enterSeq;
     work.weekSeq++;   // 在途的旧请求全部作废
+    work.addDate = null;
     $('#wk-body').innerHTML = '';   // 先清掉上次离开时的内容，避免人员加载期间显示旧的一周还能点
     work.week = null;
     try {
@@ -1103,7 +1103,7 @@
   });
   function switchWorkPerson(id) {
     work.person = id; savePerson(id);
-    work.weekSeq++; work.week = null;
+    work.weekSeq++; work.week = null; work.addDate = null;
     $('#wk-body').innerHTML = '';   // 先清掉上一位的内容，再加载
     renderWorkPeople();
     loadWorkWeek(work.start || mondayOf(todayStr()), { keepTarget: true });
@@ -1133,32 +1133,35 @@
     }
   }
   function workEntryHtml(e) {
-    const todo = e.kind === 'todo';
-    return `<div class="wk-entry${e.done ? ' done' : ''}">
-      ${todo ? `<button type="button" class="wk-check" data-act="check" data-id="${e.id}" aria-label="${e.done ? '取消完成' : '标记完成'}：${esc(e.text)}">${e.done ? '✓' : ''}</button>` : '<span class="wk-dot">·</span>'}
-      <button type="button" class="wk-txt" data-act="edit" data-id="${e.id}">${todo ? '<span class="badge">待办</span> ' : ''}${esc(e.text)}</button>
-      ${todo && !e.done ? `<button type="button" class="btn small" data-act="next" data-id="${e.id}">挪到下周</button>` : ''}
+    return `<div class="wk-entry">
+      <span class="wk-dot">·</span>
+      <button type="button" class="wk-txt" data-act="edit" data-id="${e.id}">${esc(e.text)}</button>
+      <button type="button" class="wk-del" data-act="del" data-id="${e.id}" title="删除" aria-label="删除：${esc(e.text)}">×</button>
     </div>`;
   }
   function renderWorkWeek() {
     const today = todayStr();
+    // 重绘会丢掉行内输入框，先记下里面还没提交的文字，画完再放回去
+    const oldInput = $('#wk-body .wk-day-input');
+    const keepText = oldInput ? oldInput.value : '', hadFocus = !!oldInput && document.activeElement === oldInput;
     $('#wk-body').innerHTML = work.week.days.map(d => `
       <div class="wk-day${d.date === work.target ? ' target' : ''}${d.date === today ? ' today' : ''}">
-        <button type="button" class="wk-day-head" data-date="${esc(d.date)}">${WEEKDAYS[parseLocalDate(d.date).getDay()]} ${esc(mdLabel(d.date))}${d.date === today ? ' <span class="badge menu-cur">今天</span>' : ''}</button>
+        <div class="wk-day-bar">
+          <button type="button" class="wk-day-head" data-date="${esc(d.date)}">${WEEKDAYS[parseLocalDate(d.date).getDay()]} ${esc(mdLabel(d.date))}${d.date === today ? ' <span class="badge menu-cur">今天</span>' : ''}</button>
+          <button type="button" class="wk-day-plus${d.date === work.addDate ? ' on' : ''}" data-act="day-add" data-date="${esc(d.date)}" title="在这一天记一条" aria-label="在${esc(mdLabel(d.date))}记一条">${d.date === work.addDate ? '−' : '＋'}</button>
+        </div>
         <div class="wk-list">${d.entries.map(workEntryHtml).join('') || '<div class="wk-empty">—</div>'}</div>
+        ${d.date === work.addDate ? `<form class="wk-day-add" data-date="${esc(d.date)}"><input class="wk-day-input" maxlength="200" placeholder="在这一天记一条…" autocomplete="off" enterkeyhint="send"><button type="submit" class="btn small primary">记</button></form>` : ''}
       </div>`).join('');
+    const input = $('#wk-body .wk-day-input');
+    if (input) { input.value = keepText; if (hadFocus || !oldInput) input.focus(); }
   }
-  $('#wk-prev').addEventListener('click', () => { if (work.person != null) loadWorkWeek(addDaysStr(work.start, -7)); });
-  $('#wk-next').addEventListener('click', () => { if (work.person != null) loadWorkWeek(addDaysStr(work.start, 7)); });
-  $('#wk-today').addEventListener('click', () => { if (work.person != null) loadWorkWeek(mondayOf(todayStr())); });
+  $('#wk-prev').addEventListener('click', () => { if (work.person != null) { work.addDate = null; loadWorkWeek(addDaysStr(work.start, -7)); } });
+  $('#wk-next').addEventListener('click', () => { if (work.person != null) { work.addDate = null; loadWorkWeek(addDaysStr(work.start, 7)); } });
+  $('#wk-today').addEventListener('click', () => { if (work.person != null) { work.addDate = null; loadWorkWeek(mondayOf(todayStr())); } });
   $('#work-back').addEventListener('click', () => switchView('tools'));
 
-  // 类型开关：已做 / 待办
-  $$('.wk-kind').forEach(b => b.addEventListener('click', () => {
-    work.kind = b.dataset.kind;
-    $$('.wk-kind').forEach(x => x.classList.toggle('active', x === b));
-  }));
-  // 打字记录
+  // 打字记录（顶部输入框，记到「记到：…」那一天；只记「已做」，待办在「待办」标签里添加）
   $('#wk-form').addEventListener('submit', async e => {
     e.preventDefault();
     const text = $('#wk-text').value.trim();
@@ -1167,19 +1170,38 @@
     if (work.adding) return;
     work.adding = true;
     try {
-      await postJson('/api/work/entries', { person_id: work.person, date: work.target, kind: work.kind, text });
+      await postJson('/api/work/entries', { person_id: work.person, date: work.target, text });
       $('#wk-text').value = '';
       await loadWorkWeek(work.start, { keepTarget: true });
     } catch (err) { toast(err.message); }
     finally { work.adding = false; $('#wk-text').focus(); }
   });
+  // 每一天自己的输入行：记到这一天（不改顶部的「记到」），记完保持展开方便连续记
+  $('#wk-body').addEventListener('submit', async e => {
+    const form = e.target.closest('.wk-day-add');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector('.wk-day-input');
+    const text = input.value.trim();
+    if (!text) return;
+    if (work.person == null) { toast('人员还没有加载出来，请稍候或点上面的重试'); return; }
+    if (work.adding) return;
+    work.adding = true;
+    const date = form.dataset.date;
+    try {
+      await postJson('/api/work/entries', { person_id: work.person, date, text });
+      input.value = '';   // 重绘时会取这里的值，所以先清空
+      await loadWorkWeek(work.start, { keepTarget: true });
+    } catch (err) { toast(err.message); }
+    finally { work.adding = false; const again = $('#wk-body .wk-day-input'); if (again) again.focus(); }
+  });
   // 一段口述文字记成多条（语音录入调用），带「撤销」；出错时抛出，由调用方提示
-  // snap：点麦克风那一刻的 {person, date, kind}。录音和识别要几秒，期间用户可能切人员或翻周，结果仍记到当时选好的地方
+  // snap：点麦克风那一刻的 {person, date}。录音和识别要几秒，期间用户可能切人员或翻周，结果仍记到当时选好的地方
   async function addWorkEntries(text, note = '', snap = null) {
     const person = snap ? snap.person : work.person;
     if (person == null) throw new Error('人员还没有加载出来');
-    const date = snap ? snap.date : work.target, kind = snap ? snap.kind : work.kind;
-    const r = await postJson('/api/work/entries/batch', { person_id: person, date, kind, text });
+    const date = snap ? snap.date : work.target;
+    const r = await postJson('/api/work/entries/batch', { person_id: person, date, text });
     if (person === work.person) await loadWorkWeek(work.start, { keepTarget: true });
     const who = person === work.person ? '' : `（记在「${personName(person)}」名下）`;
     toast(`已记录 ${r.count} 条${r.truncated ? '（只记了前 5 条，后面的没有记）' : ''}${note}${who}`, 7000, {
@@ -1190,29 +1212,47 @@
       },
     });
   }
-  // 周内的点击：改目标日、勾选、挪到下周、编辑
+  // 周内的点击：改目标日、展开某天的输入行、删除（带撤销）、编辑
   $('#wk-body').addEventListener('click', async e => {
     const head = e.target.closest('.wk-day-head');
     if (head) { work.target = head.dataset.date; renderWorkHead(); renderWorkWeek(); return; }
     const el = e.target.closest('[data-act]');
     if (!el) return;
-    const act = el.dataset.act, id = Number(el.dataset.id);
+    const act = el.dataset.act;
+    if (act === 'day-add') {
+      work.addDate = work.addDate === el.dataset.date ? null : el.dataset.date;   // 再点一次收起；同一时间只展开一天
+      renderWorkWeek();
+      return;
+    }
+    const id = Number(el.dataset.id);
     const entry = findWorkEntry(id);
     if (!entry) { toast('这条记录已经不存在了'); loadWorkWeek(work.start, { keepTarget: true }); return; }
     if (act === 'edit') { openWorkEditor(entry); return; }
-    if (el.disabled) return;
-    el.disabled = true;
-    try {
-      if (act === 'check') await postJson('/api/work/entries/' + id, { done: !entry.done }, 'PUT');
-      else if (act === 'next') { await postJson('/api/work/entries/' + id, { date: nextMondayStr(entry.date) }, 'PUT'); toast('已挪到下周一'); }
-      await loadWorkWeek(work.start, { keepTarget: true });
-    } catch (err) { toast(err.message); el.disabled = false; }
+    if (act === 'del') {
+      if (el.disabled) return;
+      el.disabled = true;
+      const person = work.person, saved = { date: entry.date, text: entry.text };   // 撤销时用被删那一刻的人员、日期和文字
+      try {
+        await api('/api/work/entries/' + id, { method: 'DELETE' });
+        await loadWorkWeek(work.start, { keepTarget: true });
+        toast('已删除', 7000, {
+          label: '撤销',
+          onClick: async () => {
+            try {
+              await postJson('/api/work/entries', { person_id: person, date: saved.date, text: saved.text });   // 重新创建，会排在当天末尾
+              toast('已恢复');
+              if (person === work.person) loadWorkWeek(work.start, { keepTarget: true });
+            } catch (err) { toast(err.message); }
+          },
+        });
+      } catch (err) { toast(err.message); el.disabled = false; }
+    }
   });
 
   // 编辑一条记录
   function openWorkEditor(entry) {
     work.editing = entry.id; work.saving = false;
-    $('#we-text').value = entry.text; $('#we-date').value = entry.date; $('#we-kind').value = entry.kind;
+    $('#we-text').value = entry.text; $('#we-date').value = entry.date;
     $('#we-err').textContent = '';
     $('#work-editor').classList.remove('hidden');
   }
@@ -1223,7 +1263,7 @@
     e.preventDefault();
     const id = work.editing;
     if (id == null || work.saving) return;
-    const body = { text: $('#we-text').value.trim(), date: $('#we-date').value, kind: $('#we-kind').value };
+    const body = { text: $('#we-text').value.trim(), date: $('#we-date').value };
     if (!body.text) { $('#we-err').textContent = '内容不能为空'; return; }
     if (!body.date) { $('#we-err').textContent = '请选择日期'; return; }
     work.saving = true; $('#we-save').disabled = true;

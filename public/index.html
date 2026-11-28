@@ -209,10 +209,6 @@
   <p id="wk-target" class="wk-target"></p>
   <form id="wk-form" class="quick">
     <input id="wk-text" placeholder="今天做了什么…" autocomplete="off" enterkeyhint="send" maxlength="200">
-    <span class="wk-kinds" role="group" aria-label="记录类型">
-      <button type="button" class="wk-kind active" data-kind="done">已做</button>
-      <button type="button" class="wk-kind" data-kind="todo">待办</button>
-    </span>
     <button type="button" id="wk-asr" class="btn small asr-btn hidden" data-asr="work" title="语音记录" aria-label="语音记录"><svg class="ico" aria-hidden="true"><use href="#i-mic"></use></svg><span class="asr-sec"></span></button>
     <button type="submit" class="btn small primary">记</button>
   </form>
@@ -434,7 +430,6 @@
     <div class="sheet-scroll">
       <label>内容 *<input id="we-text" required maxlength="200" autocomplete="off"></label>
       <label>日期<input id="we-date" type="date" required></label>
-      <label>类型<select id="we-kind"><option value="done">已做</option><option value="todo">待办</option></select></label>
       <p id="we-err" class="err"></p>
       <button type="button" class="btn block danger" id="we-del">删除这条记录</button>
     </div>

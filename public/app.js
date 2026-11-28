@@ -534,7 +534,7 @@
     if (!((view === 'items' && asr.target === 'quick') || (view === 'work' && asr.target === 'work'))) asrAbort();
     if (view === 'locations') { $('#view-locations').classList.remove('hidden'); renderLocations(); }
     if (view === 'plans') { $('#view-plans').classList.remove('hidden'); enterPlans(); }
-    if (view === 'settings') $('#view-settings').classList.remove('hidden');
+    if (view === 'settings') { $('#view-settings').classList.remove('hidden'); loadReportStatus(); }
     if (view === 'home') { $('#view-home').classList.remove('hidden'); renderHome(); }
     if (view === 'shopping') { $('#view-shopping').classList.remove('hidden'); renderShopping(); }
     if (view === 'tools') $('#view-tools').classList.remove('hidden');
@@ -1092,6 +1092,7 @@
       return;
     }
     renderWorkPeople();
+    loadReportStatus();                   // 「整理成正式周报」按钮是否可用
     loadWorkWeek(mondayOf(todayStr()));   // 每次进入都回到本周
   }
   // 只有两个人以上才显示切换条
@@ -1514,6 +1515,234 @@
       renderWorkPeopleSheet();
       toast(`已添加「${p.name}」`);
     } catch (err) { toast(err.message); }
+  });
+
+  // ---------- 正式周报（AI 整理 + 套用公司 Word 模板导出 docx） ----------
+  // 流程：设置页上传模板和示例 → 每周工作页点「整理成正式周报」→ 先看将发给 AI 的内容 → 发送 → 草稿里修改 → 导出 docx。
+  // 来自 AI 的文字只通过 .value / .textContent 进入页面，骨架里不带任何用户 / AI 的文字。
+  const report = { status: null, prep: null, start: null, person: null, kind: 'single', dates: null, busy: false, dateSeq: 0 };
+
+  async function loadReportStatus() {
+    try { report.status = await api('/api/report/status'); } catch { report.status = null; }
+    renderReportButton();
+    renderReportSettings();
+  }
+  function renderReportButton() {
+    const s = report.status;
+    const reason = !s ? '暂时读不到周报设置' : !s.enabled ? 'AI 还没有配置' + (s.problem ? '：' + s.problem : '（沿用图片识别的配置，或在配置文件里单独配置）') : !s.hasTemplate ? '请先在设置里上传周报模板' : '';
+    $('#wk-report2-btn').disabled = !!reason || report.busy;
+    $('#wk-report2-hint').textContent = reason;
+    $('#wk-report2-hint').classList.toggle('hidden', !reason);
+  }
+
+  // ---- 设置页：模板、示例、基准日期 ----
+  function renderReportSettings() {
+    const s = report.status;
+    if (!s) { $('#rp-status').textContent = '读不到周报导出的状态'; return; }
+    $('#rp-status').textContent = `AI：${s.enabled ? '可用' : '不可用' + (s.problem ? '（' + s.problem + '）' : '（还没有配置）')}　模板：${s.hasTemplate ? '已上传' : '还没上传'}　示例：${s.examples.length} 份`;
+    if (document.activeElement !== $('#rp-anchor')) $('#rp-anchor').value = s.anchor;
+    const box = $('#rp-examples');
+    box.textContent = '';
+    for (const ex of s.examples) {
+      const row = document.createElement('div'); row.className = 'wp-row';
+      const name = document.createElement('span'); name.className = 'wp-name'; name.textContent = `${ex.title}（${ex.chars} 字）`;
+      const del = document.createElement('button'); del.type = 'button'; del.className = 'btn small danger'; del.textContent = '删除'; del.dataset.id = String(ex.id);
+      row.append(name, del);
+      box.appendChild(row);
+    }
+  }
+  $('#rp-template-file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = '';   // 清空后才能再次选择同一个文件
+    if (!file) return;
+    try {
+      const r = await api('/api/report/template', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
+      toast('模板已上传' + (r.name ? `（姓名：${r.name}）` : ''), 4000);
+    } catch (err) { toast(err.message, 6000); }
+    loadReportStatus();
+  });
+  $('#rp-example-file').addEventListener('change', async e => {
+    const files = [...e.target.files];
+    e.target.value = '';
+    if (!files.length) return;
+    let okCount = 0;
+    const failed = [];
+    for (const f of files) {   // 一份一份传，某一份失败不影响其他的
+      try {
+        await api('/api/report/examples', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream', 'X-Report-Title': encodeURIComponent(f.name.replace(/\.docx$/i, '')) }, body: f });
+        okCount++;
+      } catch (err) { failed.push(`${f.name}：${err.message}`); }
+    }
+    toast(`已上传 ${okCount} 份示例` + (failed.length ? '；失败：' + failed.join('；') : ''), 7000);
+    loadReportStatus();
+  });
+  $('#rp-examples').addEventListener('click', async e => {
+    const b = e.target.closest('button[data-id]');
+    if (!b) return;
+    if (!await askConfirm('删除这份示例周报？', { okText: '删除', danger: true })) return;
+    try { await api('/api/report/examples/' + b.dataset.id, { method: 'DELETE' }); } catch (err) { toast(err.message); }
+    loadReportStatus();
+  });
+  $('#rp-anchor-save').addEventListener('click', async () => {
+    const v = $('#rp-anchor').value;
+    if (!v) { toast('请选择一个日期'); return; }
+    try { const r = await postJson('/api/report/settings', { anchor: v }, 'PUT'); toast(`已保存：${r.anchor} 那一周是单休`, 4000); }
+    catch (err) { toast(err.message); }
+    loadReportStatus();
+  });
+
+  // ---- 发送前预览 ----
+  function closeReportPrepare() { if (report.busy) return; $('#report-prepare').classList.add('hidden'); report.prep = null; }
+  $('#rpp-cancel').addEventListener('click', closeReportPrepare);
+  $('#report-prepare .sheet-backdrop').addEventListener('click', closeReportPrepare);
+  async function openReportPrepare() {
+    if (report.busy || work.person == null || !work.start) return;
+    report.busy = true; renderReportButton();
+    try {
+      const r = await postJson('/api/report/prepare', { person: work.person, start: work.start });
+      if (r.empty) { toast('这一周还没有记录'); return; }
+      report.prep = { hash: r.hash, start: work.start, person: work.person };
+      $('#rpp-text').value = r.prompt;
+      $('#rpp-info').textContent = `共 ${r.chars} 字，参考的示例周报 ${r.examples} 份。点「发送」后，这些内容会发给 AI 服务，不会保存在 AI 之外的地方。`;
+      $('#rpp-err').textContent = '';
+      $('#report-prepare').classList.remove('hidden');
+    } catch (err) { toast(err.message, 5000); }
+    finally { report.busy = false; renderReportButton(); }
+  }
+  $('#wk-report2-btn').addEventListener('click', openReportPrepare);
+  $('#rpp-send').addEventListener('click', async () => {
+    const prep = report.prep;
+    if (!prep || report.busy) return;
+    report.busy = true;
+    $('#rpp-send').disabled = true; $('#rpp-cancel').disabled = true; $('#rpp-send').textContent = '整理中…'; $('#rpp-err').textContent = '';
+    let again = false;
+    try {
+      const draft = await postJson('/api/report/generate', { person: prep.person, start: prep.start, hash: prep.hash });
+      $('#report-prepare').classList.add('hidden');
+      report.prep = null;
+      await openReportDraft(draft, prep);
+    } catch (err) {
+      if (/内容在预览之后有变化/.test(err.message)) again = true;   // 预览之后记录变了：回到预览，让用户重新看一遍
+      else $('#rpp-err').textContent = err.message;
+    } finally {
+      report.busy = false;
+      $('#rpp-send').disabled = false; $('#rpp-cancel').disabled = false; $('#rpp-send').textContent = '发送';
+      renderReportButton();
+    }
+    if (again) { $('#report-prepare').classList.add('hidden'); toast('内容在预览之后有变化，请重新确认', 4000); openReportPrepare(); }
+  });
+
+  // ---- 草稿 ----
+  const syncDraftButtons = () => {
+    const items = $$('#rpd-items .rpd-item');
+    items.forEach(box => { $('.rpd-del', box).disabled = items.length <= 1; });   // 至少保留一个项目
+  };
+  function addDraftItem(it = { title: '', lines: [], progress: 100 }) {
+    const box = document.createElement('div');
+    box.className = 'rpd-item';
+    // 骨架里没有任何用户 / AI 的文字；内容下面用 .value 写入
+    box.innerHTML = '<label>项目名称<input class="rpd-title" maxlength="60" autocomplete="off"></label>'
+      + '<label>细节（每行一条）<textarea class="rpd-lines" rows="4" spellcheck="false"></textarea></label>'
+      + '<div class="rpd-row"><label>完成度（%）<input class="rpd-progress" type="number" min="0" max="100" step="1"></label><button type="button" class="btn small danger rpd-del">删除这个项目</button></div>';
+    $('.rpd-title', box).value = it.title;
+    $('.rpd-lines', box).value = it.lines.join('\n');
+    $('.rpd-progress', box).value = String(it.progress);
+    $('#rpd-items').appendChild(box);
+    syncDraftButtons();
+  }
+  function addDraftPlan(text = '') {
+    const row = document.createElement('div');
+    row.className = 'rpd-plan-row';
+    row.innerHTML = '<input class="rpd-plan-text" maxlength="200" autocomplete="off" placeholder="计划内容"><button type="button" class="btn small danger rpd-plan-del" aria-label="删除这条计划">×</button>';
+    $('.rpd-plan-text', row).value = text;
+    $('#rpd-plan').appendChild(row);
+  }
+  function renderDraftDates() {
+    const d = report.dates;
+    $$('.rpd-kind').forEach(b => b.classList.toggle('active', b.dataset.kind === report.kind));
+    $('#rpd-filename').textContent = d && d.filename ? '文件名：' + d.filename : '';
+  }
+  async function openReportDraft(draft, prep) {
+    report.start = prep.start; report.person = prep.person;
+    let d = null;
+    try { d = await api(`/api/report/dates?start=${encodeURIComponent(prep.start)}&today=${encodeURIComponent(todayStr())}`); }
+    catch (err) { toast('日期没有算出来，请手动填写：' + err.message, 5000); }
+    report.dates = d; report.kind = d ? d.kind : 'single';
+    $('#rpd-time').value = d ? d.time : '';
+    $('#rpd-plan-range').value = d ? d.planRange : '';
+    $('#rpd-issues').value = draft.issues;
+    $('#rpd-items').textContent = ''; draft.items.forEach(addDraftItem);
+    $('#rpd-plan').textContent = ''; draft.plan.forEach(addDraftPlan);
+    $('#rpd-err').textContent = '';
+    renderDraftDates();
+    $('#report-draft').classList.remove('hidden');
+  }
+  $('#rpd-add-item').addEventListener('click', () => addDraftItem());
+  $('#rpd-add-plan').addEventListener('click', () => addDraftPlan());
+  $('#rpd-items').addEventListener('click', e => {
+    const b = e.target.closest('.rpd-del');
+    if (!b || b.disabled) return;
+    b.closest('.rpd-item').remove();
+    syncDraftButtons();
+  });
+  $('#rpd-plan').addEventListener('click', e => { const b = e.target.closest('.rpd-plan-del'); if (b) b.closest('.rpd-plan-row').remove(); });
+  // 切换单休 / 双休：重新算计划日期和文件名（「时间」不动）
+  $$('.rpd-kind').forEach(b => b.addEventListener('click', async () => {
+    const kind = b.dataset.kind;
+    if (kind === report.kind || !report.start) return;
+    const seq = ++report.dateSeq;
+    try {
+      const d = await api(`/api/report/dates?start=${encodeURIComponent(report.start)}&today=${encodeURIComponent(todayStr())}&kind=${kind}`);
+      if (seq !== report.dateSeq) return;
+      report.dates = d; report.kind = d.kind;
+      $('#rpd-plan-range').value = d.planRange;
+      renderDraftDates();
+    } catch (err) { $('#rpd-err').textContent = err.message; }
+  }));
+  const closeReportDraft = () => { if (report.busy) return; $('#report-draft').classList.add('hidden'); };
+  $('#rpd-cancel').addEventListener('click', closeReportDraft);   // 草稿里改了很多东西，所以不绑定点背景关闭，免得误触丢失
+  $('#rpd-regen').addEventListener('click', () => { if (report.busy) return; $('#report-draft').classList.add('hidden'); openReportPrepare(); });
+
+  // ---- 导出 ----
+  $('#rpd-export').addEventListener('click', async () => {
+    if (report.busy) return;
+    const items = $$('#rpd-items .rpd-item').map(box => {
+      const pv = $('.rpd-progress', box).value.trim();
+      return {
+        title: $('.rpd-title', box).value.trim(),
+        lines: $('.rpd-lines', box).value.split('\n').map(s => s.trim()).filter(Boolean),
+        progress: pv === '' ? null : Number(pv),   // 空着就交给服务端报「完成度应为 0–100 的整数」
+      };
+    });
+    const body = {
+      draft: { items, issues: $('#rpd-issues').value.trim(), plan: $$('#rpd-plan .rpd-plan-text').map(i => i.value.trim()).filter(Boolean) },
+      time: $('#rpd-time').value.trim(), planRange: $('#rpd-plan-range').value.trim(), kind: report.kind, start: report.start,
+    };
+    report.busy = true; $('#rpd-export').disabled = true; $('#rpd-err').textContent = '';
+    try {
+      const res = await fetch('/api/report/export', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (res.status === 401) { showLogin(); return; }
+      if (!res.ok) {
+        let msg = '导出失败';
+        try { msg = (await res.json()).error || msg; } catch { /* 响应不是 JSON */ }
+        $('#rpd-err').textContent = msg;   // 失败时弹层不关，用户的修改都还在
+        return;
+      }
+      const blob = await res.blob();
+      const m = /filename\*=UTF-8''([^;]+)/i.exec(res.headers.get('content-disposition') || '');
+      let name = '';
+      try { name = m ? decodeURIComponent(m[1]) : ''; } catch { /* 取不到就用下面的备用名 */ }
+      if (!name) name = (report.dates && report.dates.filename) || '周报.docx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      toast('已导出：' + name, 4000);
+      $('#report-draft').classList.add('hidden');
+      loadReportStatus();   // 导出的周报自动成为示例，设置页的示例数跟着变
+    } catch (err) { $('#rpd-err').textContent = (err && err.message) || '导出失败'; }
+    finally { report.busy = false; $('#rpd-export').disabled = false; renderReportButton(); }
   });
 
   // ---------- 首页仪表盘 ----------

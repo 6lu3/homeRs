@@ -218,7 +218,11 @@
     <button type="submit" class="btn small primary">记</button>
   </form>
   <div id="wk-body" class="pad"></div>
-  <div class="pad"><button type="button" id="wk-report-btn" class="btn primary block">生成周报</button></div>
+  <div class="pad">
+    <button type="button" id="wk-report-btn" class="btn primary block">生成周报</button>
+    <button type="button" id="wk-report2-btn" class="btn block" disabled>整理成正式周报</button>
+    <p id="wk-report2-hint" class="muted hidden"></p>
+  </div>
   </div>
   <div id="wk-todos" class="hidden">
     <div class="td-filters" role="group" aria-label="待办范围">
@@ -337,6 +341,15 @@
     <h3>变动记录</h3>
     <div id="log-list"></div>
     <button type="button" id="log-more" class="btn block">查看最近 100 条</button>
+
+    <h3>周报导出</h3>
+    <p id="rp-status" class="muted"></p>
+    <label class="btn block">上传周报模板（.docx）<input type="file" id="rp-template-file" accept=".docx" hidden></label>
+    <label class="btn block">上传示例周报（.docx，可多选）<input type="file" id="rp-example-file" accept=".docx" multiple hidden></label>
+    <div id="rp-examples"></div>
+    <label>基准单休周（填某个单休周里的任意一天）<input type="date" id="rp-anchor"></label>
+    <button type="button" id="rp-anchor-save" class="btn block">保存基准日期</button>
+    <p class="muted">模板和示例只保存在你的服务器上；整理周报时，示例和本周记录会发给图片识别用的那个 AI 服务。老式 .doc 请先在 Word 里另存为 .docx。</p>
 
     <h3>修改密码</h3>
     <form id="pw-form">
@@ -486,6 +499,53 @@
     <div class="sheet-scroll">
       <textarea id="wr-text" class="wk-report-text" rows="14" spellcheck="false"></textarea>
       <p class="muted">可以直接修改，再点「复制」。</p>
+    </div>
+  </div>
+</div>
+
+<!-- 每周工作：整理成正式周报——发送前预览 -->
+<div id="report-prepare" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="rpp-cancel">取消</button>
+      <strong>将发送给 AI 的内容</strong>
+      <button type="button" class="btn small primary" id="rpp-send">发送</button>
+    </div>
+    <div class="sheet-scroll">
+      <p id="rpp-info" class="muted"></p>
+      <textarea id="rpp-text" class="wk-report-text" rows="14" readonly spellcheck="false"></textarea>
+      <p id="rpp-err" class="err"></p>
+    </div>
+  </div>
+</div>
+
+<!-- 每周工作：整理成正式周报——草稿，可修改后导出 docx -->
+<div id="report-draft" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="rpd-cancel">取消</button>
+      <strong>正式周报草稿</strong>
+      <button type="button" class="btn small primary" id="rpd-export">导出 docx</button>
+    </div>
+    <div class="sheet-scroll">
+      <div class="rpd-kinds" role="group" aria-label="本周类型">
+        <button type="button" class="rpd-kind" data-kind="single">本周单休</button>
+        <button type="button" class="rpd-kind" data-kind="double">本周双休</button>
+      </div>
+      <label>时间（也是签名处的日期）<input id="rpd-time" autocomplete="off" placeholder="例如 2026.11.28"></label>
+      <h4 class="rpd-h">本周工作内容</h4>
+      <div id="rpd-items"></div>
+      <button type="button" class="btn block" id="rpd-add-item">＋ 添加项目</button>
+      <label>需协调解决的问题或者建议<input id="rpd-issues" maxlength="200" autocomplete="off"></label>
+      <h4 class="rpd-h">下周计划</h4>
+      <div id="rpd-plan"></div>
+      <button type="button" class="btn block" id="rpd-add-plan">＋ 添加计划</button>
+      <label>计划日期<input id="rpd-plan-range" autocomplete="off" placeholder="例如 2026.11.30-2026.12.4"></label>
+      <p id="rpd-filename" class="muted"></p>
+      <p id="rpd-err" class="err"></p>
+      <button type="button" class="btn block" id="rpd-regen">重新整理</button>
     </div>
   </div>
 </div>

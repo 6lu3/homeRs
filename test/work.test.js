@@ -48,56 +48,48 @@ check('nextMonday：非法日期抛错', () => {
   throws(() => nextMonday('abc'), '日期格式应为 YYYY-MM-DD');
 });
 
-const E = (date, kind, text, done = false) => ({ date, kind, text, done });
+const R = (date, text) => ({ date, text });
+const O = (due_date, text) => ({ due_date, text });
+const T = (start, over = {}) => buildReport({ start, entries: [], doneTodos: [], openTodos: [], ...over });
 
 check('buildReport：完整示例逐字比较', () => {
   const r = buildReport({
     start: '2026-11-23',
-    entries: [
-      E('2026-11-23', 'done', '对接 A 项目接口'),
-      E('2026-11-24', 'done', '修了登录 bug'),
-      E('2026-11-24', 'done', '开周会'),
-      E('2026-11-27', 'todo', '整理测试报告'),
-    ],
-    nextWeekTodos: [],
+    entries: [R('2026-11-23', '对接 A 项目接口'), R('2026-11-24', '修了登录 bug'), R('2026-11-24', '开周会')],
+    doneTodos: [R('2026-11-24', '写方案')],
+    openTodos: [O('2026-11-27', '整理测试报告'), O('', '联系供应商')],
   });
   eq(r.empty, false);
-  eq(r.text, ['本周工作（11/23 – 11/29）', '周一', '- 对接 A 项目接口', '周二', '- 修了登录 bug', '- 开周会', '下周计划', '- 整理测试报告'].join('\n'));
+  eq(r.text, ['本周工作（11/23 – 11/29）', '周一', '- 对接 A 项目接口', '周二', '- 修了登录 bug', '- 开周会', '- 写方案', '下周计划', '- 整理测试报告', '- 联系供应商'].join('\n'));
 });
-check('buildReport：没有记录时为空', () => {
-  eq(buildReport({ start: '2026-11-23', entries: [], nextWeekTodos: [] }), { text: '', empty: true });
-  // 只有下周待办、本周一条记录都没有：按规格仍然不生成
-  eq(buildReport({ start: '2026-11-23', entries: [], nextWeekTodos: [{ date: '2026-11-30', text: 'x' }] }), { text: '', empty: true });
+check('buildReport：没有记录也没有完成的待办时为空，即使有没完成的待办', () => {
+  eq(T('2026-11-23'), { text: '', empty: true });
+  eq(T('2026-11-23', { openTodos: [O('2026-11-30', 'x'), O('', 'y')] }), { text: '', empty: true });
 });
-check('buildReport：已完成待办算本周做了什么，未完成的只在下周计划', () => {
-  const r = buildReport({
-    start: '2026-11-23',
-    entries: [E('2026-11-25', 'todo', '写方案', true), E('2026-11-26', 'todo', '评审方案', false)],
-    nextWeekTodos: [],
+check('buildReport：只有完成的待办（没有记录）也能生成', () => {
+  eq(T('2026-11-23', { doneTodos: [R('2026-11-25', '写方案')] }).text, ['本周工作（11/23 – 11/29）', '周三', '- 写方案'].join('\n'));
+});
+check('buildReport：下周计划排序——有日期的按日期升序，没日期的在最后', () => {
+  const r = T('2026-11-23', {
+    entries: [R('2026-11-23', 'a')],
+    openTodos: [O('2026-12-02', 'c'), O('', 'u1'), O('2026-11-30', 'b'), O('2026-11-30', 'b2'), O('', 'u2'), O('2026-11-20', '过期')],
   });
-  eq(r.text, ['本周工作（11/23 – 11/29）', '周三', '- 写方案', '下周计划', '- 评审方案'].join('\n'));
+  eq(r.text.split('\n').slice(-7), ['下周计划', '- 过期', '- b', '- b2', '- c', '- u1', '- u2']);
 });
-check('buildReport：下周已有的待办按日期升序追加在本周未完成待办之后', () => {
-  const r = buildReport({
-    start: '2026-11-23',
-    entries: [E('2026-11-23', 'done', '甲'), E('2026-11-24', 'todo', '乙')],
-    nextWeekTodos: [{ date: '2026-12-02', text: '丁' }, { date: '2026-11-30', text: '丙' }, { date: '2026-11-30', text: '丙2' }],
-  });
-  eq(r.text.split('\n').slice(-5), ['下周计划', '- 乙', '- 丙', '- 丙2', '- 丁']);
+check('buildReport：没有未完成待办时没有下周计划', () => {
+  eq(T('2026-11-23', { entries: [R('2026-11-23', 'a')] }).text.includes('下周计划'), false);
 });
-check('buildReport：只有未完成待办时没有日子段，没有待办时没有下周计划段', () => {
-  eq(buildReport({ start: '2026-11-23', entries: [E('2026-11-24', 'todo', '乙')], nextWeekTodos: [] }).text,
-    ['本周工作（11/23 – 11/29）', '下周计划', '- 乙'].join('\n'));
-  const r = buildReport({ start: '2026-11-23', entries: [E('2026-11-24', 'done', '甲')], nextWeekTodos: [] });
-  eq(r.text.includes('下周计划'), false);
+check('buildReport：同一天先列记录再列完成的待办，周日显示为周日', () => {
+  const r = T('2026-11-23', { entries: [R('2026-11-29', '记录')], doneTodos: [R('2026-11-29', '待办')] });
+  eq(r.text.split('\n').slice(1), ['周日', '- 记录', '- 待办']);
+});
+check('buildReport：没有内容的日子省略', () => {
+  const r = T('2026-11-23', { entries: [R('2026-11-23', 'a'), R('2026-11-27', 'b')] });
+  eq(r.text.split('\n').slice(1), ['周一', '- a', '周五', '- b']);
 });
 check('buildReport：跨月、跨年的标题', () => {
-  eq(buildReport({ start: '2026-11-30', entries: [E('2026-11-30', 'done', 'a')], nextWeekTodos: [] }).text.split('\n')[0], '本周工作（11/30 – 12/6）');
-  eq(buildReport({ start: '2026-12-28', entries: [E('2026-12-28', 'done', 'a')], nextWeekTodos: [] }).text.split('\n')[0], '本周工作（12/28 – 1/3）');
-});
-check('buildReport：同一天保持输入顺序，周日也能正确显示', () => {
-  const r = buildReport({ start: '2026-11-23', entries: [E('2026-11-29', 'done', 'z'), E('2026-11-29', 'done', 'a')], nextWeekTodos: [] });
-  eq(r.text.split('\n').slice(1), ['周日', '- z', '- a']);
+  eq(T('2026-11-30', { entries: [R('2026-11-30', 'a')] }).text.split('\n')[0], '本周工作（11/30 – 12/6）');
+  eq(T('2026-12-28', { entries: [R('2026-12-28', 'a')] }).text.split('\n')[0], '本周工作（12/28 – 1/3）');
 });
 
 console.log(`\n${pass} 通过，${fail} 失败`);

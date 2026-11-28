@@ -200,6 +200,11 @@
     <button type="button" id="work-people-btn" class="btn small">人员</button>
   </header>
   <div id="work-people" class="study-members hidden"></div>
+  <div class="wk-tabs" role="tablist">
+    <button type="button" class="wk-tab active" data-wtab="records">记录</button>
+    <button type="button" class="wk-tab" data-wtab="todos">待办</button>
+  </div>
+  <div id="wk-records">
   <div class="menu-nav">
     <button type="button" id="wk-prev" class="icon-btn" title="上一周"><svg class="ico" aria-hidden="true"><use href="#i-chevron-left"></use></svg></button>
     <span id="wk-label" class="menu-range"></span>
@@ -214,6 +219,20 @@
   </form>
   <div id="wk-body" class="pad"></div>
   <div class="pad"><button type="button" id="wk-report-btn" class="btn primary block">生成周报</button></div>
+  </div>
+  <div id="wk-todos" class="hidden">
+    <div class="td-filters" role="group" aria-label="待办范围">
+      <button type="button" class="td-filter active" data-filter="open">还没做</button>
+      <button type="button" class="td-filter" data-filter="done">已完成</button>
+      <button type="button" class="td-filter" data-filter="all">全部</button>
+    </div>
+    <form id="td-form" class="td-form">
+      <input id="td-text" placeholder="添加待办…" autocomplete="off" enterkeyhint="send" maxlength="200">
+      <input id="td-due" type="date" title="待办日期（可不选）" aria-label="待办日期（可不选）">
+      <button type="submit" class="btn small primary">添加</button>
+    </form>
+    <div id="td-body" class="pad"></div>
+  </div>
 </section>
 
 <!-- 购物清单 -->
@@ -416,6 +435,25 @@
       <button type="button" class="btn block" id="me-add">＋ 添加一道菜</button>
     </div>
   </div>
+</div>
+
+<!-- 每周工作：编辑一条待办 -->
+<div id="todo-editor" class="sheet hidden">
+  <div class="sheet-backdrop"></div>
+  <form id="td-edit-form" class="sheet-body">
+    <div class="sheet-head">
+      <button type="button" class="btn small" id="td-edit-cancel">取消</button>
+      <strong>编辑待办</strong>
+      <button type="submit" class="btn small primary" id="td-edit-save">保存</button>
+    </div>
+    <div class="sheet-scroll">
+      <label>内容 *<input id="td-edit-text" required maxlength="200" autocomplete="off"></label>
+      <label>待办日期（可不选）<input id="td-edit-due" type="date"></label>
+      <button type="button" class="btn small" id="td-clear-due">清除日期</button>
+      <p id="td-edit-err" class="err"></p>
+      <button type="button" class="btn block danger" id="td-edit-del">删除这条待办</button>
+    </div>
+  </form>
 </div>
 
 <!-- 每周工作：编辑一条记录 -->

@@ -750,11 +750,40 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .wp-row:last-child { border-bottom: 0; }
 #wp-add { margin-top: 12px; }
 @media (min-width: 720px) {
-  /* 每周工作：宽屏居中；这些块不再套用全局的左右缩进，统一对齐 */
-  #view-work > .menu-nav, #view-work > .wk-target, #view-work > #wk-form, #view-work > #work-people, #view-work > .pad { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; padding-right: 0; padding-left: 0; }
+  /* 每周工作：宽屏居中。人员条在这里；标签栏和两个面板的规则在文件末尾（它们现在包在 #wk-records / #wk-todos 里） */
+  #view-work > #work-people { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; padding-right: 0; padding-left: 0; }
   .wk-day-head { padding: 10px 18px; font-size: 14px; }
   .wk-list { padding: 4px 18px 10px; }
   .wk-day-add { padding: 8px 18px 14px; }
   .wk-txt { font-size: 16px; }
   .wk-day-head:hover { background: var(--primary-soft); }
+}
+
+/* 每周工作：标签与待办清单（类名不要用 .study-tab，app.js 里有按它绑定的点击处理） */
+.wk-tabs { display: flex; gap: 6px; padding: 4px 14px 8px; }
+.wk-tab { flex: 1; padding: 8px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--muted); font: inherit; font-size: 14px; cursor: pointer; transition: all .2s ease; }
+.wk-tab.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); font-weight: 600; }
+.td-filters { display: flex; gap: 6px; padding: 0 14px 8px; }
+.td-filter { flex: 1; padding: 6px 0; border: 1px solid var(--line); border-radius: var(--radius-btn); background: var(--card); color: var(--muted); font: inherit; font-size: 13.5px; cursor: pointer; transition: all .2s ease; }
+.td-filter.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.td-form { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px 10px; }
+.td-form #td-text { min-width: 0; flex: 1 1 100%; }
+.td-form #td-due { min-width: 0; flex: 1; }
+.td-form .btn { flex: none; }
+.td-list { overflow: hidden; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); padding: 4px 14px; }
+.td-meta { display: block; margin-top: 1px; color: var(--muted); font-size: 12.5px; text-decoration: none; }
+.td-overdue { margin-left: 4px; color: var(--warn); font-weight: 600; }
+.td-nodate { color: var(--muted); }
+.td-row.done .td-meta { text-decoration: none; }
+#td-clear-due { margin-bottom: 4px; }
+@media (min-width: 720px) {
+  #view-work > .wk-tabs, #view-work > #wk-records, #view-work > #wk-todos { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; }
+  #view-work > .wk-tabs { padding-right: 0; padding-left: 0; }
+  /* 面板挪进容器后，里面的块不再各自居中，而是顶满容器（容器已经居中） */
+  #view-work #wk-records > .menu-nav, #view-work #wk-records > .wk-target, #view-work #wk-records > #wk-form, #view-work #wk-records > .pad { width: 100%; max-width: none; margin: 0; padding-right: 0; padding-left: 0; }
+  #view-work #wk-todos .td-filters, #view-work #wk-todos .td-form, #view-work #wk-todos .pad { padding-right: 0; padding-left: 0; }
+  .td-form #td-text { flex: 1 1 auto; }
+  .td-form #td-due { flex: none; }
+  .td-list { padding: 4px 18px; }
+  .wk-tab:hover:not(.active), .td-filter:hover:not(.active) { background: var(--field-bg); color: var(--text); }
 }

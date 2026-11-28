@@ -1057,7 +1057,8 @@
   });
 
   // ---------- 每周工作 ----------
-  const work = { person: null, people: [], start: null, target: null, addDate: null, week: null, weekSeq: 0, enterSeq: 0, editing: null, saving: false, adding: false };
+  const work = { person: null, people: [], start: null, target: null, addDate: null, week: null, weekSeq: 0, enterSeq: 0, editing: null, saving: false, adding: false,
+    tab: 'records', todoFilter: 'open', todos: [], todoSeq: 0, todoAdding: false, todoEditing: null, todoSaving: false };
   // 选中的人员记在这台设备上；隐私模式下 localStorage 可能抛错，忽略即可
   const savedPerson = () => { try { return Number(localStorage.getItem('work_person')); } catch { return 0; } };
   const savePerson = id => { try { localStorage.setItem('work_person', String(id)); } catch { /* 忽略 */ } };
@@ -1067,7 +1068,11 @@
   async function enterWork() {
     const seq = ++work.enterSeq;
     work.weekSeq++;   // 在途的旧请求全部作废
+    work.todoSeq++;
     work.addDate = null;
+    work.todos = [];
+    showWorkTabUi('records');   // 每次进入都回到「记录」标签
+    $('#td-body').innerHTML = '';
     $('#wk-body').innerHTML = '';   // 先清掉上次离开时的内容，避免人员加载期间显示旧的一周还能点
     work.week = null;
     try {
@@ -1104,9 +1109,12 @@
   function switchWorkPerson(id) {
     work.person = id; savePerson(id);
     work.weekSeq++; work.week = null; work.addDate = null;
+    work.todoSeq++; work.todos = [];
     $('#wk-body').innerHTML = '';   // 先清掉上一位的内容，再加载
+    $('#td-body').innerHTML = '';
     renderWorkPeople();
-    loadWorkWeek(work.start || mondayOf(todayStr()), { keepTarget: true });
+    if (work.tab === 'todos') loadWorkTodos();
+    else loadWorkWeek(work.start || mondayOf(todayStr()), { keepTarget: true });
   }
 
   function renderWorkHead() {
@@ -1288,6 +1296,159 @@
       loadWorkWeek(work.start, { keepTarget: true });
     } catch (err) { $('#we-err').textContent = err.message; }
     finally { work.saving = false; $('#we-save').disabled = false; $('#we-del').disabled = false; }
+  });
+
+  // ---- 待办标签 ----
+  // 标签切换：只负责显示哪个面板；待办标签才会去请求待办
+  function showWorkTabUi(tab) {
+    work.tab = tab;
+    $$('.wk-tab').forEach(b => b.classList.toggle('active', b.dataset.wtab === tab));
+    $('#wk-records').classList.toggle('hidden', tab !== 'records');
+    $('#wk-todos').classList.toggle('hidden', tab !== 'todos');
+  }
+  $$('.wk-tab').forEach(b => b.addEventListener('click', () => {
+    if (work.person == null) return;   // 人员没加载出来时先别切（上面有重试按钮）
+    showWorkTabUi(b.dataset.wtab);
+    if (b.dataset.wtab === 'todos') loadWorkTodos();
+  }));
+  $$('.td-filter').forEach(b => b.addEventListener('click', () => {
+    if (work.person == null) return;
+    setTodoFilter(b.dataset.filter);
+    loadWorkTodos();
+  }));
+  function setTodoFilter(f) {
+    work.todoFilter = f;
+    $$('.td-filter').forEach(x => x.classList.toggle('active', x.dataset.filter === f));
+  }
+  async function loadWorkTodos() {
+    if (work.person == null) return;
+    const seq = ++work.todoSeq;
+    try {
+      const todos = await api(`/api/work/todos?person=${work.person}&filter=${work.todoFilter}`);
+      if (seq !== work.todoSeq) return;   // 已有更新的请求，丢弃过期响应
+      work.todos = todos;
+      renderWorkTodos();
+    } catch (err) {
+      if (seq !== work.todoSeq) return;
+      work.todos = [];
+      $('#td-body').innerHTML = '<p class="muted sd-empty">加载失败，请切换一下标签或范围重试。</p>';   // 不留旧内容
+      toast(err.message);
+    }
+  }
+  const findWorkTodo = id => work.todos.find(t => t.id === id);
+  function todoRowHtml(t, today) {
+    const overdue = !t.done && t.due_date && t.due_date < today;
+    const label = t.done ? `完成于 ${esc(mdLabel(t.done_date))}`
+      : t.due_date ? `${esc(mdLabel(t.due_date))}${overdue ? ' <span class="td-overdue">已过期</span>' : ''}` : '<span class="td-nodate">没选日期</span>';
+    return `<div class="wk-entry td-row${t.done ? ' done' : ''}">
+      <button type="button" class="wk-check" data-act="check" data-id="${t.id}" aria-label="${t.done ? '取消完成' : '标记完成'}：${esc(t.text)}">${t.done ? '✓' : ''}</button>
+      <button type="button" class="wk-txt" data-act="edit" data-id="${t.id}">${esc(t.text)}<span class="td-meta">${label}</span></button>
+      ${!t.done && t.due_date ? `<button type="button" class="btn small" data-act="next" data-id="${t.id}">挪到下周</button>` : ''}
+      <button type="button" class="wk-del" data-act="del" data-id="${t.id}" title="删除" aria-label="删除：${esc(t.text)}">×</button>
+    </div>`;
+  }
+  function renderWorkTodos() {
+    const today = todayStr();
+    if (!work.todos.length) {
+      $('#td-body').innerHTML = `<p class="muted sd-empty">${work.todoFilter === 'done' ? '还没有完成的待办。' : work.todoFilter === 'open' ? '没有没做完的待办。在上面添加一条吧。' : '还没有待办。'}</p>`;
+      return;
+    }
+    $('#td-body').innerHTML = `<div class="td-list">${work.todos.map(t => todoRowHtml(t, today)).join('')}</div>`;
+  }
+
+  // 添加：日期可以不选
+  $('#td-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('#td-text').value.trim();
+    if (!text) return;
+    if (work.person == null) { toast('人员还没有加载出来，请稍候或点上面的重试'); return; }
+    if (work.todoAdding) return;
+    work.todoAdding = true;
+    try {
+      await postJson('/api/work/todos', { person_id: work.person, text, due_date: $('#td-due').value || '' });
+      $('#td-text').value = ''; $('#td-due').value = '';
+      if (work.todoFilter === 'done') setTodoFilter('open');   // 新加的待办没完成，在「已完成」里看不到，切回「还没做」
+      await loadWorkTodos();
+    } catch (err) { toast(err.message); }
+    finally { work.todoAdding = false; $('#td-text').focus(); }
+  });
+
+  // 列表里的操作：勾选 / 取消、挪到下周、编辑、删除（带撤销）
+  $('#td-body').addEventListener('click', async e => {
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const act = el.dataset.act, id = Number(el.dataset.id);
+    const t = findWorkTodo(id);
+    if (!t) { toast('这条待办已经不存在了'); loadWorkTodos(); return; }
+    if (act === 'edit') { openTodoEditor(t); return; }
+    if (el.disabled) return;
+    el.disabled = true;
+    const person = work.person;
+    try {
+      if (act === 'check') {
+        await postJson('/api/work/todos/' + id, t.done ? { done: false } : { done: true, done_date: todayStr() }, 'PUT');
+      } else if (act === 'next') {
+        // 新日期 = 「原日期和今天中较晚的那天」所在周的下一周周一（日期字符串可以直接比较大小）
+        const base = t.due_date > todayStr() ? t.due_date : todayStr();
+        await postJson('/api/work/todos/' + id, { due_date: addDaysStr(mondayOf(base), 7) }, 'PUT');
+        toast('已挪到下周一');
+      } else if (act === 'del') {
+        const saved = { text: t.text, due_date: t.due_date, done: t.done, done_date: t.done_date };   // 撤销时原样恢复
+        await api('/api/work/todos/' + id, { method: 'DELETE' });
+        toast('已删除', 7000, {
+          label: '撤销',
+          onClick: async () => {
+            try {
+              await postJson('/api/work/todos', { person_id: person, ...saved });
+              toast('已恢复');
+              if (person === work.person && work.tab === 'todos') loadWorkTodos();
+            } catch (err) { toast(err.message); }
+          },
+        });
+      }
+      await loadWorkTodos();
+    } catch (err) { toast(err.message); el.disabled = false; }
+  });
+
+  // 编辑一条待办：文字、日期（可以清除）、删除
+  function openTodoEditor(t) {
+    work.todoEditing = t.id; work.todoSaving = false;
+    $('#td-edit-text').value = t.text; $('#td-edit-due').value = t.due_date || '';
+    $('#td-edit-err').textContent = '';
+    $('#todo-editor').classList.remove('hidden');
+  }
+  function closeTodoEditor() { if (work.todoSaving) return; $('#todo-editor').classList.add('hidden'); work.todoEditing = null; }   // 保存或删除中不允许关闭
+  $('#td-edit-cancel').addEventListener('click', closeTodoEditor);
+  $('#todo-editor .sheet-backdrop').addEventListener('click', closeTodoEditor);
+  $('#td-clear-due').addEventListener('click', () => { $('#td-edit-due').value = ''; });
+  $('#td-edit-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = work.todoEditing;
+    if (id == null || work.todoSaving) return;
+    const text = $('#td-edit-text').value.trim();
+    if (!text) { $('#td-edit-err').textContent = '内容不能为空'; return; }
+    work.todoSaving = true; $('#td-edit-save').disabled = true; $('#td-edit-del').disabled = true;
+    try {
+      await postJson('/api/work/todos/' + id, { text, due_date: $('#td-edit-due').value || '' }, 'PUT');   // 日期框为空 = 清除日期
+      work.todoSaving = false;
+      closeTodoEditor();
+      loadWorkTodos();
+    } catch (err) { $('#td-edit-err').textContent = err.message; }
+    finally { work.todoSaving = false; $('#td-edit-save').disabled = false; $('#td-edit-del').disabled = false; }
+  });
+  $('#td-edit-del').addEventListener('click', async () => {
+    const id = work.todoEditing;
+    if (id == null || work.todoSaving) return;
+    if (!await askConfirm('删除这条待办？', { okText: '删除', danger: true })) return;
+    if (work.todoEditing !== id || work.todoSaving) return;   // 等确认期间弹层可能已经关了或在保存
+    work.todoSaving = true; $('#td-edit-save').disabled = true; $('#td-edit-del').disabled = true;
+    try {
+      await api('/api/work/todos/' + id, { method: 'DELETE' });
+      work.todoSaving = false;
+      closeTodoEditor();
+      loadWorkTodos();
+    } catch (err) { $('#td-edit-err').textContent = err.message; }
+    finally { work.todoSaving = false; $('#td-edit-save').disabled = false; $('#td-edit-del').disabled = false; }
   });
 
   // 周报

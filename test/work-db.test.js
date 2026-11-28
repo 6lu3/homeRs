@@ -66,17 +66,25 @@ check('全新库：不抛错，只预置一个人员「我」，没有待办；�
   initWorkSchema(db);
   eq(db.prepare('SELECT COUNT(*) AS n FROM work_people').get().n, 1);
 });
-check('迁移失败时回滚：旧待办不会被删', () => {
+check('迁移失败时回滚：已经搬过去的行也撤销、旧待办不被删、连接不停在事务里', () => {
   const db = oldDb();
-  initWorkSchema(db);                      // 先建好新表
-  db.exec('DROP TABLE work_todos');        // 再破坏它，让迁移的 INSERT 失败
+  initWorkSchema(db);                      // 先把旧数据迁完，新表和默认数据都就位
   db.prepare("INSERT INTO work_entries(person_id, date, kind, text, done, created_at) VALUES(1, '2032-04-01', 'todo', '还在', 0, 'x')").run();
+  const before = todos(db).length;
+  // 让「INSERT 成功、DELETE 失败」：这样才真的走到事务中途出错。（以前这条用例是删掉新表，INSERT 一开始就失败，没测到回滚）
+  db.exec("CREATE TRIGGER block_delete BEFORE DELETE ON work_entries BEGIN SELECT RAISE(ABORT, 'boom'); END;");
   let threw = false;
   try { migrateTodos(db); } catch { threw = true; }
   eq(threw, true);
-  eq(db.prepare("SELECT COUNT(*) AS n FROM work_entries WHERE kind = 'todo'").get().n, 1);
-  // 回滚后数据库没有停在「事务中」的状态，还能继续正常使用
-  db.prepare("INSERT INTO work_entries(person_id, date, kind, text, done, created_at) VALUES(1, '2032-04-02', 'done', 'ok', 0, 'x')").run();
+  eq(todos(db).length, before);            // 已经 INSERT 进去的那一行被回滚了，没有留下半截
+  eq(db.prepare("SELECT COUNT(*) AS n FROM work_entries WHERE kind = 'todo'").get().n, 1);   // 旧待办还在
+  // 连接没有停在「事务中」：再开一个事务不会报「cannot start a transaction within a transaction」
+  db.exec('BEGIN'); db.exec('ROLLBACK');
+  // 去掉障碍后可以重新迁移成功，说明失败没有留下需要手动修复的状态
+  db.exec('DROP TRIGGER block_delete');
+  eq(migrateTodos(db), 1);
+  eq(todos(db).length, before + 1);
+  eq(db.prepare("SELECT COUNT(*) AS n FROM work_entries WHERE kind = 'todo'").get().n, 0);
 });
 
 console.log(`\n${pass} 通过，${fail} 失败`);

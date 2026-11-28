@@ -1315,6 +1315,7 @@ route('POST', /^\/api\/work\/todos$/, async (req, res) => {
   const person = workPersonId(b.person_id);
   const text = workText(b.text), due = workDueDate(b.due_date);
   // done / done_date 只用于「撤销删除」时原样恢复；done_date 缺省取服务器日期，未完成时强制清空
+  if (b.done !== undefined && typeof b.done !== 'boolean') throw new HttpError(400, 'done 应为 true 或 false');   // 和 PUT 一致，不悄悄当成 false
   const done = b.done === true;
   const doneDate = done ? (b.done_date === undefined || b.done_date === '' ? localDate() : workDate(b.done_date)) : '';
   const id = db.prepare('INSERT INTO work_todos(person_id, text, due_date, done, done_date, created_at) VALUES(?, ?, ?, ?, ?, ?)')

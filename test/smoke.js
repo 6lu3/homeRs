@@ -516,6 +516,7 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       assert(r.status === 200 && r.body.due_date === '', '每周工作：due_date 传空串也是没选日期');
       const t3 = r.body; createdTodos.push(t3.id);
       r = await json('POST', '/api/work/todos', { ...T, text: '已过期的事', due_date: '2032-02-20' });
+      assert(r.status === 200, '每周工作：新建已过期的待办');
       const t4 = r.body; createdTodos.push(t4.id);
 
       r = await call('GET', `/api/work/todos?person=${first.id}&filter=bad`);
@@ -558,6 +559,10 @@ const assert = (c, msg) => { if (!c) throw new Error('FAIL: ' + msg); console.lo
       assert(r.status === 404 && r.body.error === '待办不存在', '每周工作：修改不存在的待办返回 404');
 
       // 撤销式重建：带 done / done_date 原样恢复
+      r = await json('POST', '/api/work/todos', { person_id: first.id, text: '不应该被写入的待办', done: 'true' });
+      assert(r.status === 400 && r.body.error === 'done 应为 true 或 false', '每周工作：新建待办时 done 不是布尔值被拒绝');
+      r = await call('GET', `/api/work/todos?person=${first.id}&filter=all`);
+      assert(!r.body.some(x => x.text === '不应该被写入的待办'), '每周工作：被拒绝的新建没有写入');
       r = await json('POST', '/api/work/todos', { person_id: first.id, text: '撤销恢复的已完成待办', due_date: '2032-03-01', done: true, done_date: '2032-03-03' });
       assert(r.status === 200 && r.body.done === true && r.body.done_date === '2032-03-03' && r.body.due_date === '2032-03-01', '每周工作：撤销重建——已完成状态原样恢复');
       createdTodos.push(r.body.id);

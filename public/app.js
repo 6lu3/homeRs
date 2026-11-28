@@ -1058,7 +1058,7 @@
 
   // ---------- 每周工作 ----------
   const work = { person: null, people: [], start: null, target: null, addDate: null, week: null, weekSeq: 0, enterSeq: 0, editing: null, saving: false, adding: false,
-    tab: 'records', todoFilter: 'open', todos: [], todoSeq: 0, todoAdding: false, todoEditing: null, todoSaving: false };
+    tab: 'records', todoFilter: 'open', todos: [], todoSeq: 0, todoAdding: false, todoEditing: null, todoSaving: false, focusAdd: false };
   // 选中的人员记在这台设备上；隐私模式下 localStorage 可能抛错，忽略即可
   const savedPerson = () => { try { return Number(localStorage.getItem('work_person')); } catch { return 0; } };
   const savePerson = id => { try { localStorage.setItem('work_person', String(id)); } catch { /* 忽略 */ } };
@@ -1132,6 +1132,8 @@
       const week = await api(`/api/work/week?start=${encodeURIComponent(start)}&person=${work.person}`);
       if (seq !== work.weekSeq) return;   // 已有更新的请求，丢弃过期响应
       work.week = week;
+      // 翻页加载期间屏幕上还是上一周，用户可能点了旧一周的标题；新一周回来时目标日若不在本周内就校正，免得记到看不见的那一天
+      if (!inWeek(work.target)) { work.target = inWeek(todayStr()) ? todayStr() : start; renderWorkHead(); }
       renderWorkWeek();
     } catch (err) {
       if (seq !== work.weekSeq) return;
@@ -1162,7 +1164,10 @@
         ${d.date === work.addDate ? `<form class="wk-day-add" data-date="${esc(d.date)}"><input class="wk-day-input" maxlength="200" placeholder="在这一天记一条…" autocomplete="off" enterkeyhint="send"><button type="submit" class="btn small primary">记</button></form>` : ''}
       </div>`).join('');
     const input = $('#wk-body .wk-day-input');
-    if (input) { input.value = keepText; if (hadFocus || !oldInput) input.focus(); }
+    // 只在用户刚点了「＋」，或者重绘前焦点本来就在行内输入框里时才聚焦；
+    // 否则（比如用户正在顶部输入框打字时后台重绘）不能抢走焦点
+    if (input) { input.value = keepText; if (hadFocus || work.focusAdd) input.focus(); }
+    work.focusAdd = false;
   }
   $('#wk-prev').addEventListener('click', () => { if (work.person != null) { work.addDate = null; loadWorkWeek(addDaysStr(work.start, -7)); } });
   $('#wk-next').addEventListener('click', () => { if (work.person != null) { work.addDate = null; loadWorkWeek(addDaysStr(work.start, 7)); } });
@@ -1229,6 +1234,7 @@
     const act = el.dataset.act;
     if (act === 'day-add') {
       work.addDate = work.addDate === el.dataset.date ? null : el.dataset.date;   // 再点一次收起；同一时间只展开一天
+      work.focusAdd = work.addDate !== null;   // 刚展开才聚焦输入框
       renderWorkWeek();
       return;
     }
@@ -1253,7 +1259,7 @@
             } catch (err) { toast(err.message); }
           },
         });
-      } catch (err) { toast(err.message); el.disabled = false; }
+      } catch (err) { toast(err.message); el.disabled = false; loadWorkWeek(work.start, { keepTarget: true }); }   // 失败也刷新：可能已在别的设备上删掉了，别让旧条目留在页面上
     }
   });
 
@@ -1310,6 +1316,8 @@
     if (work.person == null) return;   // 人员没加载出来时先别切（上面有重试按钮）
     showWorkTabUi(b.dataset.wtab);
     if (b.dataset.wtab === 'todos') loadWorkTodos();
+    // 回到记录：如果周数据被清掉了（比如在待办标签里切了人员）就重新加载，否则会是一片空白
+    else if (!work.week) loadWorkWeek(work.start || mondayOf(todayStr()), { keepTarget: true });
   }));
   $$('.td-filter').forEach(b => b.addEventListener('click', () => {
     if (work.person == null) return;
@@ -1407,7 +1415,7 @@
         });
       }
       await loadWorkTodos();
-    } catch (err) { toast(err.message); el.disabled = false; }
+    } catch (err) { toast(err.message); el.disabled = false; loadWorkTodos(); }   // 失败也刷新：可能已在别的设备上变了
   });
 
   // 编辑一条待办：文字、日期（可以清除）、删除

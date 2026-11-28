@@ -771,10 +771,9 @@ label { display: block; margin-bottom: 12px; font-size: 14px; color: var(--muted
 .td-form #td-due { min-width: 0; flex: 1; }
 .td-form .btn { flex: none; }
 .td-list { overflow: hidden; border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow-card); padding: 4px 14px; }
-.td-meta { display: block; margin-top: 1px; color: var(--muted); font-size: 12.5px; text-decoration: none; }
+.td-meta { display: inline-block; width: 100%; margin-top: 1px; color: var(--muted); font-size: 12.5px; text-decoration: none; }
 .td-overdue { margin-left: 4px; color: var(--warn); font-weight: 600; }
 .td-nodate { color: var(--muted); }
-.td-row.done .td-meta { text-decoration: none; }
 #td-clear-due { margin-bottom: 4px; }
 @media (min-width: 720px) {
   #view-work > .wk-tabs, #view-work > #wk-records, #view-work > #wk-todos { width: calc(100% - 48px); max-width: 760px; margin-right: auto; margin-left: auto; }
